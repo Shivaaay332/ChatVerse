@@ -16,7 +16,7 @@ export default function ChatScreen() {
   const hideReadReceipts = localStorage.getItem('chatverse_hide_readreceipts') === 'true';
   const hideLastSeen = localStorage.getItem('chatverse_hide_lastseen') === 'true';
 
-  // State Management for Privacy Settings
+  // Privacy Settings
   const isMuted = localStorage.getItem(`cv_mute_${receiverId}`) === 'true';
   const hasCustomPrivacy = localStorage.getItem(`cv_privacy_${receiverId}`) === 'true';
 
@@ -29,9 +29,11 @@ export default function ChatScreen() {
   const [replyingTo, setReplyingTo] = useState(null);
   
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const emojis = ['😀','😂','🤣','😍','❤️','🙏','😢','😡','👍','👎','🔥','✨','🎉','🥺','😎','😊','🥰','🙌','👏','💪'];
+  const [activeReactId, setActiveReactId] = useState(null);
+  const emojis = ['❤️','😂','😲','😢','🙏','👍','🔥','✨'];
   
   const endOfMessagesRef = useRef(null);
+  const pressTimer = useRef(null);
   const [socket, setSocket] = useState(null);
 
   const formatTime = (dateString) => {
@@ -56,8 +58,6 @@ export default function ChatScreen() {
     newSocket.on('receive_message', (newMsg) => {
       if (newMsg.sender_id === receiverId) {
         setMessages((prev) => [...prev, newMsg]);
-
-        // Mute Alert System: Mute hone par physical audio alerts suppress honge
         if (!isMuted) {
           try {
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav');
@@ -65,7 +65,6 @@ export default function ChatScreen() {
             audio.play();
           } catch(e){}
         }
-
         if (!hideReadReceipts) {
           newSocket.emit('mark_as_read', { messageId: newMsg.id, senderId: receiverId });
         }
@@ -98,7 +97,6 @@ export default function ChatScreen() {
 
   const handleTyping = (e) => {
     setMessage(e.target.value);
-    // Custom Privacy Check: Custom privacy hone par dusre user ko typing events block ho jayenge
     if (socket && !hasCustomPrivacy) {
       socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
     }
@@ -132,12 +130,24 @@ export default function ChatScreen() {
     );
   };
 
-  const handleReaction = (emoji) => {
-    if (selectedMessages.length !== 1) return;
-    const msgId = selectedMessages[0].id;
+  const handlePointerDown = (msg) => {
+    if (msg.is_deleted_for_everyone) return;
+    pressTimer.current = setTimeout(() => {
+      if (selectedMessages.length === 0) {
+        toggleSelection(msg);
+        if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(50); 
+      }
+    }, 450); 
+  };
+
+  const handlePointerUpOrLeave = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
+  const handleInlineReaction = (msgId, emoji) => {
     setMessages(messages.map(msg => msg.id === msgId ? { ...msg, reaction: emoji } : msg));
     if (socket) socket.emit('react_message', { messageId: msgId, reaction: emoji, receiverId });
-    setSelectedMessages([]);
+    setActiveReactId(null);
   };
 
   const handleStarMessages = () => {
@@ -164,15 +174,20 @@ export default function ChatScreen() {
     setSelectedMessages([]);
   };
 
+  const handleScreenClick = (e) => {
+    if (activeReactId) setActiveReactId(null);
+    if (showMenu) setShowMenu(false);
+  };
+
   return (
-    <div className="h-full w-full bg-[#F0F2F5] dark:bg-gray-900 flex flex-col relative transition-colors">
+    <div className="h-full w-full bg-[#F0F2F5] dark:bg-gray-900 flex flex-col relative transition-colors" onClick={handleScreenClick}>
       
-      {/* Top Action Bar */}
+      {/* Top Action Bar for Selected Messages */}
       {selectedMessages.length > 0 ? (
         <div className="bg-chatverse text-white px-4 py-3 shadow-md flex justify-between items-center z-30 sticky top-0 transition-all">
           <div className="flex items-center gap-4">
             <button onClick={() => setSelectedMessages([])} className="hover:bg-white/20 p-1.5 rounded-full"><X className="w-6 h-6" /></button>
-            <span className="font-bold text-lg">{selectedMessages.length} Selected</span>
+            <span className="font-bold text-lg">{selectedMessages.length}</span>
           </div>
           <div className="flex items-center gap-3">
             {selectedMessages.length === 1 && (
@@ -203,7 +218,7 @@ export default function ChatScreen() {
             </div>
           </div>
           <div className="relative">
-            <button onClick={() => setShowMenu(!showMenu)} className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"><MoreVertical className="w-5 h-5" /></button>
+            <button onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }} className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"><MoreVertical className="w-5 h-5" /></button>
             {showMenu && (
               <div className="absolute right-0 top-12 w-48 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-50">
                 <button onClick={() => { setMessages([]); setShowMenu(false); api.delete(`/chats/${receiverId}`); }} className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 font-semibold transition-colors">Clear Chat Now</button>
@@ -213,65 +228,159 @@ export default function ChatScreen() {
         </div>
       )}
 
-      {/* Messages Feed & Action Popups remain flawless and functional */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-4 no-scrollbar" onClick={() => {setShowMenu(false); setShowEmojiPicker(false);}}>
+      {/* Messages Feed */}
+      <div className="flex-1 overflow-y-auto px-3 py-6 flex flex-col no-scrollbar">
         {messages.filter(m => !m.is_deleted_for_me).map((msg, idx) => {
           const isMe = msg.sender_id === currentUser.unique_id;
           const isSelected = selectedMessages.some(m => m.id === msg.id);
+          const hasReaction = !!msg.reaction;
 
           return (
-            <div key={msg.id || idx} className={`flex flex-col max-w-[78%] relative ${isMe ? 'self-end items-end' : 'self-start items-start'}`}>
-              <div 
-                onClick={() => toggleSelection(msg)}
-                className={`px-4 py-2.5 shadow-sm text-[15px] leading-relaxed whitespace-pre-wrap cursor-pointer transition-all active:scale-[0.98] ${
-                  isSelected ? 'bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 rounded-2xl' :
-                  msg.is_deleted_for_everyone ? 'bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 rounded-2xl' 
-                  : isMe ? 'bg-chatverse text-white rounded-2xl rounded-tr-[4px]' 
-                  : 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-2xl rounded-tl-[4px]'
-              }`}>
-                {msg.reply_content && !msg.is_deleted_for_everyone && (
-                  <div className={`mb-2 p-2 rounded-lg text-[13px] line-clamp-1 border-l-4 ${isMe ? 'bg-indigo-700/30 border-white/70 text-indigo-50' : 'bg-gray-100 dark:bg-gray-700 border-chatverse text-gray-600 dark:text-gray-300'}`}>
-                    {msg.reply_content}
+            // Dynamic margin bottom: If message has reaction, give it more space so it doesn't overlap the next message
+            <div key={msg.id || idx} className={`flex w-full ${hasReaction ? 'mb-[22px]' : 'mb-1.5'} group ${isMe ? 'justify-end' : 'justify-start'}`}>
+              
+              {/* Quick Actions (For Me) -> Placed on the Left */}
+              {isMe && !msg.is_deleted_for_everyone && (
+                <div className="flex items-center gap-1 pr-2 opacity-0 group-hover:opacity-100 transition-opacity self-center">
+                  <button onClick={(e) => { e.stopPropagation(); setActiveReactId(msg.id); }} className="p-1.5 text-gray-400 hover:text-chatverse rounded-full"><Smile className="w-[18px] h-[18px]"/></button>
+                  <button onClick={(e) => { e.stopPropagation(); setReplyingTo(msg); }} className="p-1.5 text-gray-400 hover:text-chatverse rounded-full"><Reply className="w-[18px] h-[18px]"/></button>
+                </div>
+              )}
+
+              <div className="relative max-w-[80%] flex flex-col">
+                
+                {/* Main Message Bubble */}
+                <div 
+                  onClick={(e) => { e.stopPropagation(); if(selectedMessages.length > 0) toggleSelection(msg); }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(msg); }}
+                  onPointerUp={handlePointerUpOrLeave}
+                  onPointerLeave={handlePointerUpOrLeave}
+                  className={`relative px-2.5 pt-1.5 pb-1 shadow-sm cursor-pointer transition-all select-none ${
+                    isSelected ? 'bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 rounded-2xl' :
+                    msg.is_deleted_for_everyone ? 'bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 rounded-[18px]' 
+                    : isMe ? 'bg-chatverse text-white rounded-[18px] rounded-tr-[4px]' 
+                    : 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-[18px] rounded-tl-[4px]'
+                }`}>
+                  
+                  {/* Replied Content Banner */}
+                  {msg.reply_content && !msg.is_deleted_for_everyone && (
+                    <div className={`mb-1 px-2.5 py-1.5 rounded-lg text-[13px] line-clamp-1 border-l-4 ${isMe ? 'bg-indigo-700/30 border-white/70 text-indigo-50' : 'bg-gray-100 dark:bg-gray-700 border-chatverse text-gray-600 dark:text-gray-300'}`}>
+                      {msg.reply_content}
+                    </div>
+                  )}
+                  
+                  {/* 100% PERFECT WHATSAPP-STYLE SAFE CONTAINER */}
+                  <div className="relative text-[15px] leading-[1.4] break-words">
+                    <span>{msg.content}</span>
+                    
+                    {/* INVISIBLE SPACER: Time ko jagah dene ke liye ye space line break force karega */}
+                    {!msg.is_deleted_for_everyone && (
+                      <span className={`inline-block h-[12px] ${isMe ? 'w-[75px]' : 'w-[52px]'}`}></span>
+                    )}
+                  </div>
+
+                  {/* Timestamp safely locked at the absolute bottom-right corner inside the bubble */}
+                  {!msg.is_deleted_for_everyone && (
+                    <div className={`absolute bottom-1 right-2 flex items-center gap-[3px] text-[10px] font-medium select-none ${isMe ? 'text-indigo-100/90' : 'text-gray-400 dark:text-gray-500'}`}>
+                      {msg.is_starred && <Star className="w-[10px] h-[10px] fill-current mr-0.5" />}
+                      <span className="leading-none">{formatTime(msg.created_at)}</span>
+                      {isMe && (
+                        <span className="flex items-center ml-0.5">
+                          {msg.status === 'sending' && <Clock className="w-[10px] h-[10px]" />}
+                          {msg.status === 'sent' && <Check className="w-[12px] h-[12px]" />}
+                          {msg.status === 'delivered' && <CheckCheck className="w-[14px] h-[14px] text-indigo-200" />}
+                          {msg.status === 'read' && <CheckCheck className="w-[14px] h-[14px] text-[#4ADE80]" />}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Reaction Badge completely outside the bubble, perfectly aligned */}
+                {msg.reaction && !msg.is_deleted_for_everyone && (
+                   <div className={`absolute -bottom-3.5 ${isMe ? 'right-4' : 'left-4'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-10 select-none flex items-center justify-center`}>
+                     {msg.reaction}
+                   </div>
+                )}
+
+                {/* Inline Emoji Picker specifically for this message */}
+                {activeReactId === msg.id && (
+                  <div 
+                    onClick={(e) => e.stopPropagation()} 
+                    className={`absolute z-50 bottom-full mb-1 ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 shadow-xl border border-gray-100 dark:border-gray-700 p-2 flex gap-2 rounded-[20px] animate-slide-up`}
+                  >
+                     {emojis.map(emoji => (
+                       <button key={emoji} onClick={() => handleInlineReaction(msg.id, emoji)} className="text-[20px] hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center">
+                         {emoji}
+                       </button>
+                     ))}
                   </div>
                 )}
-                {msg.content}
               </div>
-              <div className="flex items-center gap-1 mt-1 px-1">
-                {msg.is_starred && <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />}
-                <span className="text-[10px] text-gray-400 font-medium">{formatTime(msg.created_at)}</span>
-                {isMe && !msg.is_deleted_for_everyone && (
-                  <div className="ml-0.5">
-                    {msg.status === 'sending' && <Clock className="w-3 h-3 text-gray-400" />}
-                    {msg.status === 'sent' && <Check className="w-3 h-3 text-gray-400" />}
-                    {msg.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 text-gray-500" />}
-                    {msg.status === 'read' && <CheckCheck className="w-3.5 h-3.5 text-blue-500" />}
-                  </div>
-                )}
-              </div>
+
+              {/* Quick Actions (For Friend) -> Placed on the Right */}
+              {!isMe && !msg.is_deleted_for_everyone && (
+                <div className="flex items-center gap-1 pl-2 opacity-0 group-hover:opacity-100 transition-opacity self-center">
+                  <button onClick={(e) => { e.stopPropagation(); setActiveReactId(msg.id); }} className="p-1.5 text-gray-400 hover:text-chatverse rounded-full"><Smile className="w-[18px] h-[18px]"/></button>
+                  <button onClick={(e) => { e.stopPropagation(); setReplyingTo(msg); }} className="p-1.5 text-gray-400 hover:text-chatverse rounded-full"><Reply className="w-[18px] h-[18px]"/></button>
+                </div>
+              )}
+
             </div>
           );
         })}
+
         {isTyping && (
-          <div className="self-start max-w-[75%] mt-1">
-            <div className="px-4 py-3.5 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl rounded-tl-[4px] shadow-sm flex items-center gap-1.5 w-fit">
+          <div className="self-start max-w-[75%] mt-2 mb-2">
+            <div className="px-4 py-3.5 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-[18px] rounded-tl-[4px] shadow-sm flex items-center gap-1.5 w-fit">
               <div className="w-1.5 h-1.5 bg-chatverse dark:bg-indigo-400 rounded-full animate-bounce"></div>
               <div className="w-1.5 h-1.5 bg-chatverse dark:bg-indigo-400 rounded-full animate-bounce delay-100"></div>
               <div className="w-1.5 h-1.5 bg-chatverse dark:bg-indigo-400 rounded-full animate-bounce delay-200"></div>
             </div>
           </div>
         )}
-        <div ref={endOfMessagesRef} className="h-2" />
+        <div ref={endOfMessagesRef} className="h-4" />
       </div>
 
-      {/* Input Field Control */}
-      <div className="bg-white dark:bg-gray-800 flex flex-col border-t border-gray-100/60 dark:border-gray-700 shadow-md z-10">
-        <div className="px-3 py-3 flex items-end gap-2 pb-4 relative">
+      {/* Input Field & Reply Banner Control */}
+      <div className="bg-white dark:bg-gray-800 flex flex-col border-t border-gray-100/60 dark:border-gray-700 shadow-md z-10 relative">
+        
+        {/* Reply Context Banner */}
+        {replyingTo && (
+          <div className="bg-gray-50 dark:bg-gray-700/50 px-4 py-2 border-l-4 border-chatverse flex justify-between items-center text-sm shadow-sm relative z-0">
+             <div className="flex flex-col">
+               <span className="text-chatverse dark:text-indigo-400 font-bold text-[13px]">Replying to {replyingTo.sender_id === currentUser.unique_id ? 'Yourself' : friendName}</span>
+               <span className="text-gray-500 dark:text-gray-300 text-[12px] line-clamp-1">{replyingTo.content}</span>
+             </div>
+             <button onClick={() => setReplyingTo(null)} className="text-gray-500 hover:text-gray-800 dark:hover:text-white p-1"><X className="w-5 h-5"/></button>
+          </div>
+        )}
+
+        {/* Global Emoji Picker (For input bar) */}
+        {showEmojiPicker && (
+          <div className="absolute bottom-[70px] left-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 shadow-2xl rounded-[20px] p-4 grid grid-cols-4 gap-3 z-50 w-64 animate-slide-up">
+            {emojis.map(e => (
+              <button key={e} onClick={() => { setMessage(prev => prev + e); setShowEmojiPicker(false); }} className="text-[22px] hover:scale-125 transition-transform flex items-center justify-center">
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="px-3 py-3 flex items-end gap-2 pb-4 z-10 bg-white dark:bg-gray-800">
+          <button 
+            onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); }} 
+            className={`p-2.5 rounded-full transition-colors ${showEmojiPicker ? 'bg-indigo-50 dark:bg-indigo-900/30 text-chatverse' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+          >
+            <Smile className="w-[22px] h-[22px]" />
+          </button>
+
           <textarea 
-            value={message} onChange={handleTyping} placeholder="Type your message..." 
-            className="flex-1 max-h-28 bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-3 focus:outline-none resize-none placeholder-gray-400" 
+            value={message} onChange={handleTyping} placeholder="Message..." 
+            className="flex-1 max-h-28 bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400" 
             rows="1" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
           />
-          <button onClick={handleSend} disabled={!message.trim()} className={`p-3 rounded-full transition-all ${message.trim() ? 'bg-chatverse text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}>
+          <button onClick={handleSend} disabled={!message.trim()} className={`p-3 rounded-full transition-all ${message.trim() ? 'bg-chatverse text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}>
             <Send className="w-5 h-5 ml-0.5" />
           </button>
         </div>
