@@ -18,7 +18,7 @@ types.setTypeParser(1114, function(stringValue) {
 const app = express();
 const server = http.createServer(app);
 
-// Initialize DB (Auto-Fixer with Advanced Notifications)
+// Initialize DB (Auto-Fixer)
 const initializeDatabase = async () => {
   try {
     await db.query(`
@@ -30,17 +30,7 @@ const initializeDatabase = async () => {
       CREATE TABLE IF NOT EXISTS post_comments (id SERIAL PRIMARY KEY, post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, comment TEXT NOT NULL, parent_id INTEGER REFERENCES post_comments(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS blocked_users (blocker_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, blocked_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, PRIMARY KEY (blocker_id, blocked_id));
       CREATE TABLE IF NOT EXISTS post_comment_likes (comment_id INTEGER REFERENCES post_comments(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, PRIMARY KEY (comment_id, user_id));
-      
-      CREATE TABLE IF NOT EXISTS notifications (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE,
-        sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE,
-        type TEXT NOT NULL,
-        reference_id INTEGER,
-        content TEXT,
-        is_read BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
+      CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, type TEXT NOT NULL, reference_id INTEGER, content TEXT, is_read BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     `);
     console.log("✅ Database Tables Auto-Synced!");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
@@ -113,8 +103,7 @@ app.get('/api/notifications/unread', authenticateToken, async (req, res) => {
   try {
     const fReqs = await db.query(`SELECT COUNT(*) FROM friend_requests WHERE receiver_id = $1 AND status = 'pending'`, [req.user.id]);
     const notifs = await db.query(`SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND is_read = FALSE`, [req.user.id]);
-    const total = parseInt(fReqs.rows[0].count) + parseInt(notifs.rows[0].count);
-    res.status(200).json({ unread: total });
+    res.status(200).json({ unread: parseInt(fReqs.rows[0].count) + parseInt(notifs.rows[0].count) });
   } catch (err) { res.status(500).json({ error: 'Error counting notifications' }); }
 });
 app.put('/api/notifications/read', authenticateToken, async (req, res) => {
@@ -124,15 +113,14 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const fReqs = await db.query(`SELECT fr.id as ref_id, u.unique_id, u.username, fr.created_at, 'friend_request' as type, FALSE as is_read, '' as content FROM friend_requests fr JOIN users u ON fr.sender_id = u.unique_id WHERE fr.receiver_id = $1 AND fr.status = 'pending'`, [req.user.id]);
     const notifs = await db.query(`SELECT n.id as notif_id, n.reference_id as ref_id, u.unique_id, u.username, n.created_at, n.type, n.is_read, n.content FROM notifications n JOIN users u ON n.sender_id = u.unique_id WHERE n.user_id = $1 ORDER BY n.created_at DESC LIMIT 50`, [req.user.id]);
-    const all = [...fReqs.rows, ...notifs.rows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    res.status(200).json(all);
+    res.status(200).json([...fReqs.rows, ...notifs.rows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
   } catch (err) { res.status(500).json({ error: 'Error fetching notifications' }); }
 });
 app.delete('/api/notifications/:id', authenticateToken, async (req, res) => {
   try { await db.query(`DELETE FROM notifications WHERE id = $1 AND user_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Notification deleted' }); } catch (err) { res.status(500).json({ error: 'Error deleting notification' }); }
 });
 
-// Friends
+// --- FRIENDS APIs ---
 app.put('/api/friends/accept/:id', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE friend_requests SET status = 'accepted' WHERE id = $1 AND receiver_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Accepted' }); } catch (err) { res.status(500).json({ error: 'Error accepting' }); }
 });
@@ -149,7 +137,28 @@ app.get('/api/friends/status/:otherUserId', authenticateToken, async (req, res) 
   } catch (err) { res.status(500).json({ error: 'Error status' }); }
 });
 
-// --- POSTS & COMMENTS (WITH NOTIFICATIONS INJECTED) ---
+// NEW: GET ALL ACCEPTED FRIENDS FOR THE CHAT LIST MODAL
+app.get('/api/friends', authenticateToken, async (req, res) => {
+  try {
+    const query = `
+      SELECT u.unique_id, u.username, u.bio 
+      FROM friend_requests fr 
+      JOIN users u ON (u.unique_id = fr.sender_id OR u.unique_id = fr.receiver_id) 
+      WHERE (fr.sender_id = $1 OR fr.receiver_id = $1) 
+      AND fr.status = 'accepted' 
+      AND u.unique_id != $1
+      AND u.unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $1) 
+      AND u.unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $1)
+      ORDER BY u.username ASC
+    `;
+    const result = await db.query(query, [req.user.id]);
+    res.status(200).json(result.rows);
+  } catch (err) { 
+    res.status(500).json({ error: 'Error fetching friends list' }); 
+  }
+});
+
+// --- POSTS & COMMENTS ---
 app.post('/api/posts', authenticateToken, async (req, res) => {
   try { 
     const newPost = await db.query(`INSERT INTO posts (user_id, content) VALUES ($1, $2) RETURNING *`, [req.user.id, req.body.content]);
@@ -257,10 +266,9 @@ app.delete('/api/comments/:id', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error deleting comment' }); }
 });
 
-// --- ADVANCED CHAT APIs ---
+// --- CHAT APIs ---
 app.get('/api/chats/recent', authenticateToken, async (req, res) => {
   try { 
-    // CTE (Common Table Expression) to fetch EXACT last message and unread counts for each chat
     const query = `
       WITH RankedMessages AS (
         SELECT 
@@ -292,13 +300,9 @@ app.get('/api/chats/recent', authenticateToken, async (req, res) => {
     `;
     const result = await db.query(query, [req.user.id]);
     res.status(200).json(result.rows); 
-  } catch (err) { 
-    console.error(err);
-    res.status(500).json({ error: 'Error recent chats' }); 
-  }
+  } catch (err) { res.status(500).json({ error: 'Error recent chats' }); }
 });
 
-// API for Bottom Nav total unread chats count
 app.get('/api/messages/unread/total', authenticateToken, async (req, res) => {
   try {
     const result = await db.query(`SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND status != 'read'`, [req.user.id]);
@@ -342,7 +346,6 @@ io.on('connection', (socket) => {
       }
       const savedMsg = await db.query(`INSERT INTO messages (sender_id, receiver_id, content, status, reply_to_id, reply_content) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`, [senderId, receiverId, content, initialStatus, replyToId, replyContent]);
       
-      // Emit message to receiver in real-time
       if (onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
       socket.emit('message_status', { tempId, realId: savedMsg.rows[0].id, status: initialStatus });
     } catch (err) { console.error(err); }

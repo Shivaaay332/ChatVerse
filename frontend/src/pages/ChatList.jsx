@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Search, UserPlus, Loader, MessageSquare, ChevronRight, Star } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Search, UserPlus, Loader, MessageSquare, ChevronRight, Star, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import BottomNav from '../components/BottomNav';
@@ -23,10 +23,18 @@ export default function ChatList() {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { unique_id: '' };
   
+  // Search and Chat List States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [recentChats, setRecentChats] = useState([]);
   const [loading, setLoading] = useState(false);
+  
+  const searchInputRef = useRef(null); // Used to focus search bar
+
+  // NEW: Friends Modal States
+  const [showFriendsModal, setShowFriendsModal] = useState(false);
+  const [friendsList, setFriendsList] = useState([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
 
   const fetchRecentChats = async () => {
     try {
@@ -38,17 +46,12 @@ export default function ChatList() {
   useEffect(() => {
     fetchRecentChats();
     
-    // Live Socket Connection so chat list updates immediately without refresh
+    // Live Socket Connection
     const newSocket = io(SOCKET_URL);
     newSocket.emit('join', currentUser.unique_id);
 
-    newSocket.on('receive_message', () => {
-      fetchRecentChats(); // Silently refetch to update count and last message preview
-    });
-    
-    newSocket.on('message_updated', () => {
-      fetchRecentChats(); // Refetch if message is deleted or read status changed
-    });
+    newSocket.on('receive_message', () => { fetchRecentChats(); });
+    newSocket.on('message_updated', () => { fetchRecentChats(); });
 
     return () => newSocket.disconnect();
   }, [currentUser.unique_id]);
@@ -66,14 +69,24 @@ export default function ChatList() {
     return () => clearTimeout(delay);
   }, [searchQuery]);
 
-  // Real-Time Favorite sorting system (Puts marked users at the absolute top)
+  // Open the "New Chat" Modal and fetch accepted friends
+  const handleOpenFriendsModal = async () => {
+    setShowFriendsModal(true);
+    setFriendsLoading(true);
+    try {
+      const res = await api.get('/friends');
+      setFriendsList(res.data);
+    } catch (err) { console.error("Error fetching friends"); }
+    finally { setFriendsLoading(false); }
+  };
+
   const getProcessedChats = () => {
     return [...recentChats].sort((a, b) => {
       const isAFav = localStorage.getItem(`cv_fav_${a.unique_id}`) === 'true';
       const isBFav = localStorage.getItem(`cv_fav_${b.unique_id}`) === 'true';
       if (isAFav && !isBFav) return -1;
       if (!isAFav && isBFav) return 1;
-      return 0; // The SQL already sorted them by date, so if neither or both are pinned, date sorting stays
+      return 0; 
     });
   };
 
@@ -81,16 +94,19 @@ export default function ChatList() {
 
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col relative transition-colors">
+      
+      {/* HEADER SECTION */}
       <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-8 pb-4 z-20 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Messages</h1>
-          <button className="text-chatverse dark:text-indigo-400 bg-indigo-50 dark:bg-gray-700 p-2.5 rounded-full hover:bg-chatverse hover:text-white dark:hover:bg-indigo-500 transition-all shadow-sm">
+          <button onClick={handleOpenFriendsModal} className="text-chatverse dark:text-indigo-400 bg-indigo-50 dark:bg-gray-700 p-2.5 rounded-full hover:bg-chatverse hover:text-white dark:hover:bg-indigo-500 transition-all shadow-sm">
             <UserPlus className="w-5 h-5" />
           </button>
         </div>
         <div className="relative">
           <Search className="absolute left-4 top-3.5 text-gray-400 dark:text-gray-500 w-5 h-5" />
           <input 
+            ref={searchInputRef}
             type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by Unique ID..." 
             className="w-full pl-12 pr-4 py-3.5 bg-gray-100/80 dark:bg-gray-700 dark:text-white border border-transparent rounded-[20px] text-[15px] font-medium focus:outline-none focus:bg-white dark:focus:bg-gray-600 focus:ring-2 focus:ring-indigo-100 transition-all placeholder-gray-400"
@@ -98,6 +114,7 @@ export default function ChatList() {
         </div>
       </div>
 
+      {/* CHAT LIST FEED */}
       <div className="flex-1 overflow-y-auto no-scrollbar pb-24 pt-2">
         {loading ? (
            <div className="flex justify-center py-10"><Loader className="w-6 h-6 text-chatverse animate-spin" /></div>
@@ -124,7 +141,6 @@ export default function ChatList() {
               const hasStar = localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true';
               const isUnread = Number(user.unread_count) > 0;
               
-              // Formatting the preview of the last message beautifully
               let previewText = user.last_message || "Tap to open chat";
               if (user.is_deleted_for_me) {
                  previewText = "Tap to open chat";
@@ -165,7 +181,6 @@ export default function ChatList() {
                         {previewText}
                       </p>
                       
-                      {/* Premium Unread Counter Badge */}
                       {isUnread && (
                         <div className="w-[20px] h-[20px] bg-chatverse text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-sm shrink-0 mt-0.5">
                           {user.unread_count > 9 ? '9+' : user.unread_count}
@@ -186,6 +201,68 @@ export default function ChatList() {
           </div>
         )}
       </div>
+
+      {/* NEW: WHATSAPP-STYLE FRIENDS LIST MODAL (FULL SCREEN OVERLAY) */}
+      {showFriendsModal && (
+        <div className="absolute inset-0 z-[100] bg-[#f4f6f8] dark:bg-gray-900 flex flex-col animate-slide-up">
+          
+          {/* Modal Header */}
+          <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 z-20 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm flex items-center gap-4">
+            <button onClick={() => setShowFriendsModal(false)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+              <ArrowLeft className="w-[22px] h-[22px]" />
+            </button>
+            <div>
+               <h1 className="text-[19px] font-black text-gray-900 dark:text-white leading-none tracking-tight">Select friend</h1>
+               <p className="text-[12px] text-gray-500 font-medium mt-1">{friendsList.length} contacts</p>
+            </div>
+          </div>
+
+          {/* Modal Content */}
+          <div className="flex-1 overflow-y-auto no-scrollbar">
+             
+             {/* "Find New Friend" Button (Redirects focus to main search) */}
+             <div 
+               onClick={() => { setShowFriendsModal(false); setTimeout(() => searchInputRef.current?.focus(), 100); }}
+               className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer border-b border-gray-100 dark:border-gray-700/50 bg-white dark:bg-gray-800 transition-colors"
+             >
+                <div className="w-12 h-12 bg-indigo-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-chatverse dark:text-indigo-400">
+                   <UserPlus className="w-6 h-6" />
+                </div>
+                <span className="font-bold text-[15px] text-gray-900 dark:text-white">Find new friends</span>
+             </div>
+
+             <div className="px-6 py-3 text-[12px] font-black text-gray-400 uppercase tracking-wider">Your Friends</div>
+             
+             {/* Friends List Render */}
+             {friendsLoading ? (
+               <div className="flex justify-center py-8"><Loader className="w-6 h-6 text-chatverse animate-spin" /></div>
+             ) : friendsList.length === 0 ? (
+               <div className="text-center py-10 px-6 text-gray-400 font-medium text-[14.5px] leading-relaxed">
+                 You don't have any friends yet.<br/>Click "Find new friends" to start connecting!
+               </div>
+             ) : (
+               <div className="bg-white dark:bg-gray-800 border-y border-gray-100 dark:border-gray-700">
+                 {friendsList.map(friend => (
+                   <div 
+                     key={friend.unique_id} 
+                     onClick={() => { setShowFriendsModal(false); navigate(`/chat/${friend.unique_id}`, { state: { name: friend.username, id: friend.unique_id } }) }} 
+                     className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer border-b border-gray-50 dark:border-gray-700 last:border-0 transition-colors"
+                   >
+                      <div className="w-12 h-12 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">
+                         {friend.username.charAt(0)}
+                      </div>
+                      <div className="flex-1">
+                         <h3 className="font-bold text-[15px] text-gray-900 dark:text-white">{friend.username}</h3>
+                         <p className="text-[13px] text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{friend.bio}</p>
+                      </div>
+                   </div>
+                 ))}
+               </div>
+             )}
+          </div>
+        </div>
+      )}
+
       <BottomNav />
     </div>
   );
