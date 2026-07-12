@@ -33,7 +33,12 @@ const initializeDatabase = async () => {
 initializeDatabase();
 
 // Middlewares
-app.use(cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173"], methods: ["GET", "POST", "PUT", "DELETE"], credentials: true }));
+app.use(cors({
+  origin: ["http://localhost:5173", "http://127.0.0.1:5173", "https://chat-verse-mauve.vercel.app"],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
+
 app.use(express.json());
 
 const authenticateToken = (req, res, next) => {
@@ -188,7 +193,13 @@ app.delete('/api/chats/:otherUserId', authenticateToken, async (req, res) => {
 });
 
 // --- SOCKET.IO ---
-const io = new Server(server, { cors: { origin: ["http://localhost:5173", "http://127.0.0.1:5173"], methods: ["GET", "POST"] }});
+const io = new Server(server, { 
+  cors: { 
+    origin: ["http://localhost:5173", "http://127.0.0.1:5173", "https://chat-verse-mauve.vercel.app"], 
+    methods: ["GET", "POST"] 
+  }
+});
+
 const onlineUsers = new Map();
 
 io.on('connection', (socket) => {
