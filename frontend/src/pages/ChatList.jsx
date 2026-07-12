@@ -1,19 +1,57 @@
 import { useState, useEffect } from 'react';
 import { Search, UserPlus, Loader, MessageSquare, ChevronRight, Star } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
+import { SOCKET_URL } from '../api';
+
+const formatTime = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString.endsWith('Z') ? dateString : `${dateString}Z`);
+  const now = new Date();
+  const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+  
+  if (isToday) {
+    return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  } else {
+    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  }
+};
 
 export default function ChatList() {
   const navigate = useNavigate();
+  const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { unique_id: '' };
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [recentChats, setRecentChats] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const fetchRecentChats = async () => {
+    try {
+      const res = await api.get('/chats/recent');
+      setRecentChats(res.data);
+    } catch(err) { console.error(err); }
+  };
+
   useEffect(() => {
-    api.get('/chats/recent').then(res => setRecentChats(res.data)).catch(err => console.log(err));
-  }, []);
+    fetchRecentChats();
+    
+    // Live Socket Connection so chat list updates immediately without refresh
+    const newSocket = io(SOCKET_URL);
+    newSocket.emit('join', currentUser.unique_id);
+
+    newSocket.on('receive_message', () => {
+      fetchRecentChats(); // Silently refetch to update count and last message preview
+    });
+    
+    newSocket.on('message_updated', () => {
+      fetchRecentChats(); // Refetch if message is deleted or read status changed
+    });
+
+    return () => newSocket.disconnect();
+  }, [currentUser.unique_id]);
 
   useEffect(() => {
     const delay = setTimeout(async () => {
@@ -35,7 +73,7 @@ export default function ChatList() {
       const isBFav = localStorage.getItem(`cv_fav_${b.unique_id}`) === 'true';
       if (isAFav && !isBFav) return -1;
       if (!isAFav && isBFav) return 1;
-      return 0;
+      return 0; // The SQL already sorted them by date, so if neither or both are pinned, date sorting stays
     });
   };
 
@@ -84,23 +122,58 @@ export default function ChatList() {
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 mt-2 overflow-hidden">
             {processedChats.length > 0 ? processedChats.map((user) => {
               const hasStar = localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true';
+              const isUnread = Number(user.unread_count) > 0;
+              
+              // Formatting the preview of the last message beautifully
+              let previewText = user.last_message || "Tap to open chat";
+              if (user.is_deleted_for_me) {
+                 previewText = "Tap to open chat";
+              } else if (user.is_deleted_for_everyone) {
+                 previewText = "🚫 This message was deleted";
+              } else {
+                 if (user.sender_id === currentUser.unique_id) previewText = `You: ${previewText}`;
+                 if (user.reaction) previewText = `${previewText} ${user.reaction}`;
+              }
+
               return (
                 <div key={user.unique_id} onClick={() => navigate(`/chat/${user.unique_id}`, { state: { name: user.username, id: user.unique_id } })} className={`flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''}`}>
-                  <div className="w-12 h-12 bg-gradient-to-tr from-chatverse to-purple-500 p-[2px] rounded-full shadow-sm relative">
-                    <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-chatverse dark:text-indigo-400 font-bold text-lg uppercase">{user.username.charAt(0)}</div>
+                  
+                  <div className="w-13 h-13 shrink-0 relative">
+                    <div className="w-12 h-12 bg-gradient-to-tr from-chatverse to-purple-500 p-[2px] rounded-full shadow-sm">
+                      <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-chatverse dark:text-indigo-400 font-bold text-lg uppercase">{user.username.charAt(0)}</div>
+                    </div>
                     {hasStar && (
-                      <div className="absolute -bottom-1 -right-1 bg-yellow-400 p-0.5 rounded-full border border-white dark:border-gray-800">
-                        <Star className="w-2.5 h-2.5 text-white fill-white" />
+                      <div className="absolute -bottom-1 right-0 bg-yellow-400 p-[3px] rounded-full border border-white dark:border-gray-800">
+                        <Star className="w-[10px] h-[10px] text-white fill-white" />
                       </div>
                     )}
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-gray-900 dark:text-white text-[15px]">{user.username}</h3>
-                      {hasStar && <span className="text-[10px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-md">PINNED</span>}
+                  
+                  <div className="flex-1 min-w-0 pr-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                         <h3 className={`text-[15px] truncate ${isUnread ? 'font-black text-gray-900 dark:text-white' : 'font-bold text-gray-900 dark:text-gray-100'}`}>{user.username}</h3>
+                         {hasStar && <span className="text-[9px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-[4px] leading-none tracking-wide">PINNED</span>}
+                      </div>
+                      <span className={`text-[11.5px] whitespace-nowrap ${isUnread ? 'font-bold text-chatverse dark:text-indigo-400' : 'font-medium text-gray-400 dark:text-gray-500'}`}>
+                         {formatTime(user.last_message_time)}
+                      </span>
                     </div>
-                    <p className="text-[13px] text-gray-500 dark:text-gray-400 truncate max-w-[200px] mt-0.5 font-medium">Tap to open chat</p>
+                    
+                    <div className="flex items-center justify-between mt-0.5">
+                      <p className={`text-[13.5px] truncate max-w-[210px] ${isUnread ? 'font-bold text-gray-800 dark:text-gray-200' : 'font-medium text-gray-500 dark:text-gray-400'}`}>
+                        {previewText}
+                      </p>
+                      
+                      {/* Premium Unread Counter Badge */}
+                      {isUnread && (
+                        <div className="w-[20px] h-[20px] bg-chatverse text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-sm shrink-0 mt-0.5">
+                          {user.unread_count > 9 ? '9+' : user.unread_count}
+                        </div>
+                      )}
+                    </div>
                   </div>
+
                 </div>
               );
             }) : (

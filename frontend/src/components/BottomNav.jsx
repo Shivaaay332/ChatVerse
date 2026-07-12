@@ -1,9 +1,31 @@
+import { useState, useEffect } from 'react';
 import { Home, MessageSquare, Bell, User, Settings } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import api from '../api';
 
 export default function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+
+  // Poll for both notifications and unread messages every 5 seconds for Real-time UX
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const notifRes = await api.get('/notifications/unread');
+        setUnreadCount(notifRes.data.unread || 0);
+
+        const msgRes = await api.get('/messages/unread/total');
+        setUnreadMessagesCount(msgRes.data.unreadMessages || 0);
+      } catch (err) { /* silently fail to not interrupt UX */ }
+    };
+
+    fetchStats();
+    const interval = setInterval(fetchStats, 5000); 
+    
+    return () => clearInterval(interval);
+  }, [location.pathname]); 
 
   const navItems = [
     { id: 'home', icon: Home, path: '/home', label: 'Home' },
@@ -24,12 +46,30 @@ export default function BottomNav() {
             key={item.id}
             onClick={() => navigate(item.path)}
             className={`flex flex-col items-center gap-1 transition-all duration-300 ease-out ${
-              isActive ? 'text-chatverse -translate-y-1' : 'text-gray-400 hover:text-gray-600'
+              isActive ? 'text-chatverse -translate-y-1' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
             }`}
           >
-            <div className={`p-1.5 rounded-full transition-colors ${isActive ? 'bg-indigo-50' : ''}`}>
-              <Icon className={`w-[22px] h-[22px] ${isActive ? 'fill-indigo-100 stroke-chatverse' : ''}`} strokeWidth={isActive ? 2.5 : 2} />
+            <div className={`relative p-2 rounded-full transition-all duration-300 ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}>
+              <Icon className={`w-[22px] h-[22px] ${isActive ? 'stroke-[2.5px]' : 'stroke-[2px]'}`} />
+              
+              {/* Premium Red Dot for Notifications */}
+              {item.id === 'notifications' && unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-[9px] h-[9px] bg-red-500 rounded-full border-2 border-white dark:border-gray-900 animate-pulse"></span>
+              )}
+
+              {/* Chat Unread Badge with Number */}
+              {item.id === 'chats' && unreadMessagesCount > 0 && (
+                <span className="absolute -top-1 -right-1.5 w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white dark:border-gray-900 shadow-sm animate-bounce">
+                  {unreadMessagesCount > 9 ? '9+' : unreadMessagesCount}
+                </span>
+              )}
             </div>
+            
+            <span className={`text-[10px] font-bold transition-all duration-300 ${
+              isActive ? 'opacity-100' : 'opacity-0 translate-y-2'
+            }`}>
+              {item.label}
+            </span>
           </button>
         );
       })}
