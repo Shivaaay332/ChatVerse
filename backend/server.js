@@ -4,14 +4,13 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { types } = require('pg'); // <-- IMPORTED FOR TIMEZONE FIX
+const { types } = require('pg'); 
 const db = require('./db');
 require('dotenv').config();
 
 // ==========================================
 // 100% PERFECT KOLKATA (IST) TIMEZONE FIX
 // ==========================================
-// Ye PostgreSQL ke UTC time ko hamesha correct IST me translate karega
 types.setTypeParser(1114, function(stringValue) {
   return new Date(stringValue + 'Z'); 
 });
@@ -19,15 +18,24 @@ types.setTypeParser(1114, function(stringValue) {
 const app = express();
 const server = http.createServer(app);
 
-// Initialize DB (Auto-Fixer)
+// Initialize DB (Auto-Fixer with Nested Comments Support)
 const initializeDatabase = async () => {
   try {
     await db.query(`
+      CREATE TABLE IF NOT EXISTS users (unique_id TEXT PRIMARY KEY, username TEXT NOT NULL, email TEXT UNIQUE NOT NULL, mobile TEXT, age INTEGER, gender TEXT, password_hash TEXT NOT NULL, bio TEXT DEFAULT 'Available on ChatVerse ✨');
+      CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, content TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS friend_requests (id SERIAL PRIMARY KEY, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, receiver_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, receiver_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, content TEXT NOT NULL, status TEXT DEFAULT 'sent', reply_to_id INTEGER, reply_content TEXT, reaction TEXT, is_starred BOOLEAN DEFAULT FALSE, is_deleted_for_me BOOLEAN DEFAULT FALSE, is_deleted_for_everyone BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS post_likes (post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, PRIMARY KEY (post_id, user_id));
       CREATE TABLE IF NOT EXISTS post_comments (id SERIAL PRIMARY KEY, post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, comment TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS blocked_users (blocker_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, blocked_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, PRIMARY KEY (blocker_id, blocked_id));
+      CREATE TABLE IF NOT EXISTS post_comment_likes (comment_id INTEGER REFERENCES post_comments(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, PRIMARY KEY (comment_id, user_id));
     `);
-    console.log("✅ Database Tables Auto-Synced!");
+    
+    // Add parent_id for nested replies if it doesn't exist
+    await db.query(`ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES post_comments(id) ON DELETE CASCADE;`).catch(() => {});
+
+    console.log("✅ Database Tables Auto-Synced with Nested Comments!");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
 initializeDatabase();
@@ -38,7 +46,6 @@ app.use(cors({
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
-
 app.use(express.json());
 
 const authenticateToken = (req, res, next) => {
@@ -69,47 +76,54 @@ app.post('/api/auth/login', async (req, res) => {
     const user = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $1', [req.body.unique_id]);
     if (user.rows.length === 0) return res.status(400).json({ error: 'User not found!' });
     if (!await bcrypt.compare(req.body.password, user.rows[0].password_hash)) return res.status(400).json({ error: 'Incorrect password!' });
-    const token = jwt.sign({ id: user.rows[0].unique_id }, process.env.JWT_SECRET || 'key', { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.rows[0].unique_id }, process.env.JWT_SECRET || 'chatverse_super_secret_key_2026', { expiresIn: '7d' });
     res.status(200).json({ message: 'Login successful!', token, user: { unique_id: user.rows[0].unique_id, username: user.rows[0].username, bio: user.rows[0].bio } });
   } catch (err) { res.status(500).json({ error: 'Error during login' }); }
 });
 
 // --- USER & FRIEND APIs ---
 app.get('/api/users/search', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT unique_id, username, bio FROM users WHERE unique_id ILIKE $1 AND unique_id != $2 LIMIT 10`, [`%${req.query.query}%`, req.user.id])).rows); } 
-  catch (err) { res.status(500).json({ error: 'Error searching' }); }
+  try { 
+    const result = await db.query(`SELECT unique_id, username, bio FROM users WHERE unique_id ILIKE $1 AND unique_id != $2 AND unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $2) AND unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $2) LIMIT 10`, [`%${req.query.query}%`, req.user.id]);
+    res.status(200).json(result.rows); 
+  } catch (err) { res.status(500).json({ error: 'Error searching' }); }
 });
-
 app.get('/api/users/me/stats', authenticateToken, async (req, res) => {
-  try { res.status(200).json({ friendsCount: parseInt((await db.query(`SELECT COUNT(DISTINCT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END) FROM friend_requests WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'`, [req.user.id])).rows[0].count) }); } 
-  catch (err) { res.status(500).json({ error: 'Error stats' }); }
+  try { res.status(200).json({ friendsCount: parseInt((await db.query(`SELECT COUNT(DISTINCT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END) FROM friend_requests WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'`, [req.user.id])).rows[0].count) }); } catch (err) { res.status(500).json({ error: 'Error stats' }); }
 });
-
 app.put('/api/users/me/bio', authenticateToken, async (req, res) => {
-  try { await db.query(`UPDATE users SET bio = $1 WHERE unique_id = $2`, [req.body.bio, req.user.id]); res.status(200).json({ message: 'Bio updated' }); } 
-  catch (err) { res.status(500).json({ error: 'Error updating bio' }); }
+  try { await db.query(`UPDATE users SET bio = $1 WHERE unique_id = $2`, [req.body.bio, req.user.id]); res.status(200).json({ message: 'Bio updated' }); } catch (err) { res.status(500).json({ error: 'Error updating bio' }); }
 });
 
+// Blocks
+app.post('/api/users/block', authenticateToken, async (req, res) => {
+  try {
+    const { blocked_id } = req.body;
+    await db.query(`INSERT INTO blocked_users (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [req.user.id, blocked_id]);
+    await db.query(`DELETE FROM friend_requests WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, blocked_id]);
+    res.status(200).json({ message: 'User blocked successfully' });
+  } catch (err) { res.status(500).json({ error: 'Error blocking user' }); }
+});
+app.get('/api/users/blocked', authenticateToken, async (req, res) => {
+  try { res.status(200).json((await db.query(`SELECT b.blocked_id, u.username FROM blocked_users b JOIN users u ON b.blocked_id = u.unique_id WHERE b.blocker_id = $1`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching blocked users' }); }
+});
+app.delete('/api/users/unblock/:id', authenticateToken, async (req, res) => {
+  try { await db.query(`DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2`, [req.user.id, req.params.id]); res.status(200).json({ message: 'User unblocked successfully' }); } catch (err) { res.status(500).json({ error: 'Error unblocking user' }); }
+});
+
+// Friends
 app.get('/api/friends/requests', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT fr.id, u.unique_id, u.username, fr.created_at FROM friend_requests fr JOIN users u ON fr.sender_id = u.unique_id WHERE fr.receiver_id = $1 AND fr.status = 'pending'`, [req.user.id])).rows); } 
-  catch (err) { res.status(500).json({ error: 'Error requests' }); }
+  try { res.status(200).json((await db.query(`SELECT fr.id, u.unique_id, u.username, fr.created_at FROM friend_requests fr JOIN users u ON fr.sender_id = u.unique_id WHERE fr.receiver_id = $1 AND fr.status = 'pending'`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error requests' }); }
 });
-
 app.put('/api/friends/accept/:id', authenticateToken, async (req, res) => {
-  try { await db.query(`UPDATE friend_requests SET status = 'accepted' WHERE id = $1 AND receiver_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Accepted' }); } 
-  catch (err) { res.status(500).json({ error: 'Error accepting' }); }
+  try { await db.query(`UPDATE friend_requests SET status = 'accepted' WHERE id = $1 AND receiver_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Accepted' }); } catch (err) { res.status(500).json({ error: 'Error accepting' }); }
 });
-
 app.delete('/api/friends/reject/:id', authenticateToken, async (req, res) => {
-  try { await db.query(`DELETE FROM friend_requests WHERE id = $1 AND receiver_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } 
-  catch (err) { res.status(500).json({ error: 'Error rejecting' }); }
+  try { await db.query(`DELETE FROM friend_requests WHERE id = $1 AND (receiver_id = $2 OR sender_id = $2)`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } catch (err) { res.status(500).json({ error: 'Error rejecting' }); }
 });
-
 app.post('/api/friends/request', authenticateToken, async (req, res) => {
-  try { await db.query(`INSERT INTO friend_requests (sender_id, receiver_id) VALUES ($1, $2)`, [req.user.id, req.body.receiver_id]); res.status(200).json({ message: 'Sent' }); } 
-  catch (err) { res.status(500).json({ error: 'Error sending' }); }
+  try { await db.query(`INSERT INTO friend_requests (sender_id, receiver_id) VALUES ($1, $2)`, [req.user.id, req.body.receiver_id]); res.status(200).json({ message: 'Sent' }); } catch (err) { res.status(500).json({ error: 'Error sending' }); }
 });
-
 app.get('/api/friends/status/:otherUserId', authenticateToken, async (req, res) => {
   try {
     const result = await db.query(`SELECT id, status, sender_id FROM friend_requests WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, req.params.otherUserId]);
@@ -117,10 +131,9 @@ app.get('/api/friends/status/:otherUserId', authenticateToken, async (req, res) 
   } catch (err) { res.status(500).json({ error: 'Error status' }); }
 });
 
-// --- POSTS & LIKES & COMMENTS APIs ---
+// --- POSTS APIs ---
 app.post('/api/posts', authenticateToken, async (req, res) => {
-  try { res.status(201).json((await db.query(`INSERT INTO posts (user_id, content) VALUES ($1, $2) RETURNING *`, [req.user.id, req.body.content])).rows[0]); } 
-  catch (err) { res.status(500).json({ error: 'Error post' }); }
+  try { res.status(201).json((await db.query(`INSERT INTO posts (user_id, content) VALUES ($1, $2) RETURNING *`, [req.user.id, req.body.content])).rows[0]); } catch (err) { res.status(500).json({ error: 'Error post' }); }
 });
 
 app.get('/api/posts', authenticateToken, async (req, res) => {
@@ -137,17 +150,12 @@ app.get('/api/posts/user/:id', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error user posts' }); }
 });
 
-// ** NEW API: EDIT POST **
 app.put('/api/posts/:id', authenticateToken, async (req, res) => {
-  try {
-    await db.query(`UPDATE posts SET content = $1 WHERE id = $2 AND user_id = $3`, [req.body.content, req.params.id, req.user.id]);
-    res.status(200).json({ message: 'Updated' });
-  } catch (err) { res.status(500).json({ error: 'Error editing post' }); }
+  try { await db.query(`UPDATE posts SET content = $1 WHERE id = $2 AND user_id = $3`, [req.body.content, req.params.id, req.user.id]); res.status(200).json({ message: 'Updated' }); } catch (err) { res.status(500).json({ error: 'Error editing post' }); }
 });
 
 app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
-  try { await db.query(`DELETE FROM posts WHERE id = $1 AND user_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } 
-  catch (err) { res.status(500).json({ error: 'Error deleting' }); }
+  try { await db.query(`DELETE FROM posts WHERE id = $1 AND user_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } catch (err) { res.status(500).json({ error: 'Error deleting' }); }
 });
 
 app.post('/api/posts/:id/like', authenticateToken, async (req, res) => {
@@ -158,22 +166,65 @@ app.post('/api/posts/:id/like', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error like' }); }
 });
 
+app.get('/api/posts/:id/likes', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`SELECT u.unique_id, u.username, u.bio FROM post_likes pl JOIN users u ON pl.user_id = u.unique_id WHERE pl.post_id = $1`, [req.params.id]);
+    res.status(200).json(result.rows);
+  } catch (err) { res.status(500).json({ error: 'Error fetching likes list' }); }
+});
+
+// --- COMMENTS & REPLIES APIs ---
 app.get('/api/posts/:id/comments', authenticateToken, async (req, res) => {
-  try { res.json((await db.query(`SELECT c.id, c.comment, u.username FROM post_comments c JOIN users u ON c.user_id = u.unique_id WHERE c.post_id = $1 ORDER BY c.created_at ASC`, [req.params.id])).rows); } 
-  catch (err) { res.status(500).json({ error: 'Error comments' }); }
+  try { 
+    res.json((await db.query(`SELECT c.id, c.comment, c.parent_id, u.username, u.unique_id, c.created_at, (SELECT COUNT(*) FROM post_comment_likes WHERE comment_id = c.id) as like_count, EXISTS(SELECT 1 FROM post_comment_likes WHERE comment_id = c.id AND user_id = $2) as has_liked FROM post_comments c JOIN users u ON c.user_id = u.unique_id WHERE c.post_id = $1 ORDER BY c.created_at ASC`, [req.params.id, req.user.id])).rows); 
+  } catch (err) { res.status(500).json({ error: 'Error comments' }); }
 });
 
 app.post('/api/posts/:id/comments', authenticateToken, async (req, res) => {
-  try { res.json((await db.query(`INSERT INTO post_comments (post_id, user_id, comment) VALUES ($1, $2, $3) RETURNING id, comment`, [req.params.id, req.user.id, req.body.comment])).rows[0]); } 
-  catch (err) { res.status(500).json({ error: 'Error adding comment' }); }
+  try { 
+    const { comment, parent_id } = req.body;
+    const result = await db.query(`INSERT INTO post_comments (post_id, user_id, comment, parent_id) VALUES ($1, $2, $3, $4) RETURNING id, comment, parent_id, created_at`, [req.params.id, req.user.id, comment, parent_id || null]);
+    res.json(result.rows[0]); 
+  } catch (err) { res.status(500).json({ error: 'Error adding comment' }); }
+});
+
+app.post('/api/comments/:id/like', authenticateToken, async (req, res) => {
+  try {
+    const check = await db.query('SELECT * FROM post_comment_likes WHERE comment_id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (check.rows.length > 0) { await db.query('DELETE FROM post_comment_likes WHERE comment_id = $1 AND user_id = $2', [req.params.id, req.user.id]); res.json({ liked: false }); } 
+    else { await db.query('INSERT INTO post_comment_likes (comment_id, user_id) VALUES ($1, $2)', [req.params.id, req.user.id]); res.json({ liked: true }); }
+  } catch (err) { res.status(500).json({ error: 'Error liking comment' }); }
+});
+
+// NEW: Edit Comment API
+app.put('/api/comments/:id', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`UPDATE post_comments SET comment = $1 WHERE id = $2 AND user_id = $3 RETURNING *`, [req.body.comment, req.params.id, req.user.id]);
+    if (result.rows.length === 0) return res.status(403).json({ error: 'Unauthorized' });
+    res.status(200).json({ message: 'Comment updated' });
+  } catch (err) { res.status(500).json({ error: 'Error editing comment' }); }
+});
+
+// NEW: Delete Comment API (Allowed for comment author OR post author)
+app.delete('/api/comments/:id', authenticateToken, async (req, res) => {
+  try {
+    const check = await db.query(`SELECT c.user_id as comment_author, p.user_id as post_author FROM post_comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1`, [req.params.id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    
+    const { comment_author, post_author } = check.rows[0];
+    if (req.user.id === comment_author || req.user.id === post_author) {
+      await db.query(`DELETE FROM post_comments WHERE id = $1`, [req.params.id]);
+      res.status(200).json({ message: 'Comment deleted' });
+    } else {
+      res.status(403).json({ error: 'Unauthorized' });
+    }
+  } catch (err) { res.status(500).json({ error: 'Error deleting comment' }); }
 });
 
 // --- CHAT APIs ---
 app.get('/api/chats/recent', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT DISTINCT u.unique_id, u.username FROM users u JOIN messages m ON (u.unique_id = m.sender_id OR u.unique_id = m.receiver_id) WHERE (m.sender_id = $1 OR m.receiver_id = $1) AND u.unique_id != $1`, [req.user.id])).rows); } 
-  catch (err) { res.status(500).json({ error: 'Error recent chats' }); }
+  try { res.status(200).json((await db.query(`SELECT DISTINCT u.unique_id, u.username FROM users u JOIN messages m ON (u.unique_id = m.sender_id OR u.unique_id = m.receiver_id) WHERE (m.sender_id = $1 OR m.receiver_id = $1) AND u.unique_id != $1 AND u.unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $1) AND u.unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $1)`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error recent chats' }); }
 });
-
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     const messages = await db.query(`SELECT * FROM messages WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1) ORDER BY created_at ASC`, [req.user.id, req.params.otherUserId]);
@@ -181,25 +232,15 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     res.status(200).json(messages.rows);
   } catch (err) { res.status(500).json({ error: 'Error history' }); }
 });
-
 app.delete('/api/messages/forme/:id', authenticateToken, async (req, res) => {
-  try { await db.query(`UPDATE messages SET is_deleted_for_me = TRUE WHERE id = $1 AND (sender_id = $2 OR receiver_id = $2)`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } 
-  catch (err) { res.status(500).json({ error: 'Error delete msg' }); }
+  try { await db.query(`UPDATE messages SET is_deleted_for_me = TRUE WHERE id = $1 AND (sender_id = $2 OR receiver_id = $2)`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } catch (err) { res.status(500).json({ error: 'Error delete msg' }); }
 });
-
 app.delete('/api/chats/:otherUserId', authenticateToken, async (req, res) => {
-  try { await db.query(`UPDATE messages SET is_deleted_for_me = TRUE WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, req.params.otherUserId]); res.status(200).json({ message: 'Chat cleared' }); } 
-  catch (err) { res.status(500).json({ error: 'Error clear' }); }
+  try { await db.query(`UPDATE messages SET is_deleted_for_me = TRUE WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, req.params.otherUserId]); res.status(200).json({ message: 'Chat cleared' }); } catch (err) { res.status(500).json({ error: 'Error clear' }); }
 });
 
 // --- SOCKET.IO ---
-const io = new Server(server, { 
-  cors: { 
-    origin: ["http://localhost:5173", "http://127.0.0.1:5173", "https://chat-verse-mauve.vercel.app"], 
-    methods: ["GET", "POST"] 
-  }
-});
-
+const io = new Server(server, { cors: { origin: ["http://localhost:5173", "http://127.0.0.1:5173", "https://chat-verse-mauve.vercel.app"], methods: ["GET", "POST"] } });
 const onlineUsers = new Map();
 
 io.on('connection', (socket) => {
@@ -209,6 +250,9 @@ io.on('connection', (socket) => {
   socket.on('send_message', async (data) => {
     try {
       const { tempId, senderId, receiverId, content, replyToId } = data;
+      const blockCheck = await db.query(`SELECT 1 FROM blocked_users WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)`, [senderId, receiverId]);
+      if (blockCheck.rows.length > 0) return; 
+
       const initialStatus = onlineUsers.get(receiverId) ? 'delivered' : 'sent';
       let replyContent = null;
       if (replyToId) {
@@ -224,15 +268,12 @@ io.on('connection', (socket) => {
   socket.on('react_message', async ({ messageId, reaction, receiverId }) => {
     try { await db.query(`UPDATE messages SET reaction = $1 WHERE id = $2`, [reaction, messageId]); if(onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('message_updated', { id: messageId, reaction }); } catch (err) {}
   });
-
   socket.on('delete_message_everyone', async ({ messageId, receiverId }) => {
     try { await db.query(`UPDATE messages SET is_deleted_for_everyone = TRUE, content = 'This message was deleted' WHERE id = $1`, [messageId]); if(onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('message_updated', { id: messageId, is_deleted_for_everyone: true, content: 'This message was deleted' }); } catch (err) {}
   });
-
   socket.on('mark_as_read', async ({ messageId, senderId }) => {
     try { await db.query(`UPDATE messages SET status = 'read' WHERE id = $1`, [messageId]); if(onlineUsers.get(senderId)) io.to(onlineUsers.get(senderId)).emit('message_updated', { id: messageId, status: 'read' }); } catch (err) {}
   });
-
   socket.on('disconnect', async () => { if (socket.userId) { onlineUsers.delete(socket.userId); io.emit('user_offline', { userId: socket.userId }); } });
 });
 
