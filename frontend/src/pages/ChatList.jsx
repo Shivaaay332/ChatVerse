@@ -31,6 +31,10 @@ export default function ChatList() {
   
   const searchInputRef = useRef(null); // Used to focus search bar
 
+  // NEW: Global Typing States
+  const [typingUsers, setTypingUsers] = useState({});
+  const typingTimeouts = useRef({});
+
   // NEW: Friends Modal States
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [friendsList, setFriendsList] = useState([]);
@@ -50,8 +54,26 @@ export default function ChatList() {
     const newSocket = io(SOCKET_URL);
     newSocket.emit('join', currentUser.unique_id);
 
+    // NEW: Offline Sync Logic
+    newSocket.on('connect', () => {
+      newSocket.emit('sync_messages', currentUser.unique_id);
+    });
+
+    newSocket.on('sync_complete', (syncedChats) => {
+      setRecentChats(syncedChats);
+    });
+
     newSocket.on('receive_message', () => { fetchRecentChats(); });
     newSocket.on('message_updated', () => { fetchRecentChats(); });
+
+    // NEW: Catch Global Typing Event
+    newSocket.on('typing', (senderId) => {
+      setTypingUsers(prev => ({ ...prev, [senderId]: true }));
+      if (typingTimeouts.current[senderId]) clearTimeout(typingTimeouts.current[senderId]);
+      typingTimeouts.current[senderId] = setTimeout(() => {
+        setTypingUsers(prev => ({ ...prev, [senderId]: false }));
+      }, 2000);
+    });
 
     return () => newSocket.disconnect();
   }, [currentUser.unique_id]);
@@ -177,8 +199,13 @@ export default function ChatList() {
                     </div>
                     
                     <div className="flex items-center justify-between mt-0.5">
+                      {/* NEW: Global Typing Indicator Check */}
                       <p className={`text-[14px] truncate max-w-[210px] ${isUnread ? 'font-bold text-gray-800 dark:text-gray-200' : 'font-medium text-gray-500 dark:text-gray-400'}`}>
-                        {previewText}
+                        {typingUsers[user.unique_id] ? (
+                          <span className="font-bold text-[#4ADE80] italic">typing...</span>
+                        ) : (
+                          previewText
+                        )}
                       </p>
                       
                       {isUnread && (

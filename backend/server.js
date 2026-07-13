@@ -83,6 +83,29 @@ app.put('/api/users/me/bio', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE users SET bio = $1 WHERE unique_id = $2`, [req.body.bio, req.user.id]); res.status(200).json({ message: 'Bio updated' }); } catch (err) { res.status(500).json({ error: 'Error updating bio' }); }
 });
 
+// NEW: STRICT GDPR DELETE ACCOUNT API WITH PASSWORD VERIFICATION
+app.delete('/api/users/me', authenticateToken, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password is required to delete account' });
+
+    // Fetch hashed password
+    const user = await db.query('SELECT password_hash FROM users WHERE unique_id = $1', [req.user.id]);
+    if (user.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    // Verify Password
+    const isValid = await bcrypt.compare(password, user.rows[0].password_hash);
+    if (!isValid) return res.status(400).json({ error: 'Incorrect password!' });
+
+    // Delete User (ON DELETE CASCADE will automatically wipe posts, comments, likes, messages, requests)
+    await db.query('DELETE FROM users WHERE unique_id = $1', [req.user.id]);
+    res.status(200).json({ message: 'Account permanently deleted' });
+  } catch (err) { 
+    console.error('Error deleting account:', err);
+    res.status(500).json({ error: 'Error deleting account' }); 
+  }
+});
+
 app.post('/api/users/block', authenticateToken, async (req, res) => {
   try {
     const { blocked_id } = req.body;
@@ -136,8 +159,6 @@ app.get('/api/friends/status/:otherUserId', authenticateToken, async (req, res) 
     res.status(200).json(result.rows.length > 0 ? result.rows[0] : { status: 'none' });
   } catch (err) { res.status(500).json({ error: 'Error status' }); }
 });
-
-// NEW: GET ALL ACCEPTED FRIENDS FOR THE CHAT LIST MODAL
 app.get('/api/friends', authenticateToken, async (req, res) => {
   try {
     const query = `
@@ -332,6 +353,42 @@ io.on('connection', (socket) => {
   socket.on('join', (userId) => { if(userId) { onlineUsers.set(userId, socket.id); socket.userId = userId; io.emit('user_online', userId); } });
   socket.on('typing', ({ senderId, receiverId }) => { const s = onlineUsers.get(receiverId); if(s) io.to(s).emit('typing', senderId); });
   
+  socket.on('sync_messages', async (userId) => {
+    try {
+      const query = `
+        WITH RankedMessages AS (
+          SELECT 
+            m.*, 
+            CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END as other_user_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END 
+              ORDER BY m.created_at DESC
+            ) as rn
+          FROM messages m
+          WHERE (m.sender_id = $1 OR m.receiver_id = $1)
+        )
+        SELECT 
+          u.unique_id, 
+          u.username,
+          rm.content AS last_message,
+          rm.created_at AS last_message_time,
+          rm.reaction,
+          rm.sender_id,
+          rm.is_deleted_for_everyone,
+          rm.is_deleted_for_me,
+          (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read') AS unread_count
+        FROM RankedMessages rm
+        JOIN users u ON u.unique_id = rm.other_user_id
+        WHERE rm.rn = 1 
+        AND u.unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $1) 
+        AND u.unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $1)
+        ORDER BY rm.created_at DESC
+      `;
+      const result = await db.query(query, [userId]);
+      socket.emit('sync_complete', result.rows);
+    } catch (err) { console.error("Error syncing messages:", err); }
+  });
+
   socket.on('send_message', async (data) => {
     try {
       const { tempId, senderId, receiverId, content, replyToId } = data;
