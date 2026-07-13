@@ -30,7 +30,7 @@ export default function ChatScreen() {
   
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [activeReactId, setActiveReactId] = useState(null);
-  const emojis = ['❤️','😂','😲','😢','🙏','👍','🔥','✨'];
+  const emojis = ['❤️','😂','😘','😢','🙏','👍','😍'];
   
   // NEW: Swipe-to-Reply States
   const [swipingId, setSwipingId] = useState(null);
@@ -315,8 +315,7 @@ export default function ChatScreen() {
                     
                     {/* Main Message Bubble */}
                     <div 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
+                      onClick={(e) => { e.stopPropagation(); 
                         if (longPressTriggered.current) { longPressTriggered.current = false; return; }
                         if (selectedMessages.length > 0) toggleSelection(msg); 
                       }}
