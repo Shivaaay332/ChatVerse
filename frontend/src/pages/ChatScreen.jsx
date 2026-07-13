@@ -46,6 +46,25 @@ export default function ChatScreen() {
   const longPressTriggered = useRef(false);
   const [socket, setSocket] = useState(null);
 
+  // ==========================================
+  // MOBILE KEYBOARD VIEWPORT FIX
+  // ==========================================
+  const [viewportHeight, setViewportHeight] = useState('100dvh');
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+        setTimeout(() => {
+          endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      }
+    };
+    window.visualViewport?.addEventListener('resize', handleResize);
+    handleResize(); // Initial setup
+    return () => window.visualViewport?.removeEventListener('resize', handleResize);
+  }, []);
+
   const formatTime = (dateString) => {
     if (!dateString) return 'Now';
     const safeDateString = dateString.endsWith('Z') ? dateString : `${dateString}Z`;
@@ -58,6 +77,25 @@ export default function ChatScreen() {
     });
   };
 
+  // ==========================================
+  // SMART SCROLL TO BOTTOM
+  // ==========================================
+  const [showScrollButton, setShowScrollButton] = useState(false);
+
+  const handleScroll = (e) => {
+    const { scrollTop, clientHeight, scrollHeight } = e.target;
+    if (scrollHeight - scrollTop - clientHeight > 100) {
+      setShowScrollButton(true);
+    } else {
+      setShowScrollButton(false);
+    }
+  };
+
+  const scrollToBottom = () => {
+    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+  // ==========================================
+
   useEffect(() => {
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
@@ -69,7 +107,6 @@ export default function ChatScreen() {
       if (newMsg.sender_id === receiverId) {
         setMessages((prev) => [...prev, newMsg]);
         
-        // Custom Sound Logic
         if (!isMuted) {
           try {
             const tone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
@@ -97,7 +134,6 @@ export default function ChatScreen() {
       setMessages((prev) => prev.map(msg => msg.id === updatedData.id ? { ...msg, ...updatedData } : msg));
     });
 
-    // Handle incoming theme changes
     newSocket.on('theme_updated', ({ themeId }) => {
       setChatTheme(themeId);
       localStorage.setItem(`cv_theme_${receiverId}`, themeId);
@@ -208,13 +244,17 @@ export default function ChatScreen() {
     setSelectedMessages([]);
   };
 
-  const handleDeleteForMe = async () => {
+  const handleDeleteForMe = async (messageId) => {
+    const previousMessages = [...messages]; 
+    setMessages((prev) => prev.filter(msg => msg.id !== messageId));
+    setSelectedMessages([]);
     try {
-      const ids = selectedMessages.map(m => m.id);
-      for (const id of ids) await api.delete(`/messages/forme/${id}`);
-      setMessages(messages.map(msg => ids.includes(msg.id) ? { ...msg, is_deleted_for_me: true } : msg));
-      setSelectedMessages([]);
-    } catch (error) { console.error(error); }
+      await api.delete(`/messages/forme/${messageId}`);
+    } catch (err) {
+      console.error("Delete failed, reverting UI");
+      setMessages(previousMessages);
+      alert("Failed to delete message. Please try again.");
+    }
   };
 
   const handleDeleteForEveryone = () => {
@@ -231,7 +271,6 @@ export default function ChatScreen() {
     if (showMenu) setShowMenu(false);
   };
 
-  // Personalization Handlers
   const applyTheme = (themeId) => {
     setChatTheme(themeId);
     localStorage.setItem(`cv_theme_${receiverId}`, themeId);
@@ -252,12 +291,11 @@ export default function ChatScreen() {
     setShowSoundModal(false);
   };
 
-  // Dynamic Theme Styling function
   const getThemeClasses = () => {
     if (chatTheme === 'sunset') return 'bg-gradient-to-br from-rose-100 to-orange-100 dark:from-rose-950/50 dark:to-orange-950/50';
     if (chatTheme === 'emerald') return 'bg-gradient-to-br from-emerald-50 to-teal-100 dark:from-emerald-950/50 dark:to-teal-900/50';
     if (chatTheme === 'midnight') return 'bg-gradient-to-br from-indigo-100 to-purple-200 dark:from-indigo-950/50 dark:to-purple-950/50';
-    return 'bg-[#F0F2F5] dark:bg-gray-900'; // Default
+    return 'bg-[#F0F2F5] dark:bg-gray-900'; 
   };
 
   const visibleMessages = messages.filter(m => !m.is_deleted_for_me);
@@ -266,11 +304,11 @@ export default function ChatScreen() {
 
   return (
     <div 
-      className={`h-full w-full flex flex-col relative transition-colors ${getThemeClasses()}`} 
+      className={`w-full flex flex-col relative transition-colors overflow-hidden ${getThemeClasses()}`} 
+      style={{ height: viewportHeight }}
       onClick={handleScreenClick}
     >
       
-      {/* Top Action Bar for Selected Messages */}
       {selectedMessages.length > 0 ? (
         <div className="bg-chatverse text-white px-4 py-3 shadow-md flex justify-between items-center z-50 sticky top-0 transition-all">
           <div className="flex items-center gap-4">
@@ -283,23 +321,22 @@ export default function ChatScreen() {
             )}
             <button onClick={handleStarMessages} className="p-2 hover:bg-white/20 rounded-full"><Star className="w-5 h-5" /></button>
             <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
-            <button onClick={handleDeleteForMe} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5" /></button>
+            <button onClick={() => handleDeleteForMe(selectedMessages[0].id)} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5" /></button>
             {selectedMessages.every(m => m.sender_id === currentUser.unique_id) && (
               <button onClick={handleDeleteForEveryone} className="p-2 text-red-300 hover:text-red-100 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5"/></button>
             )}
           </div>
         </div>
       ) : (
-        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-md px-4 py-3 shadow-sm flex justify-between items-center z-50 sticky top-0 border-b border-gray-100 dark:border-gray-700 transition-colors">
+        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-md px-4 pt-[calc(env(safe-area-inset-top)+12px)] pb-3 shadow-sm flex justify-between items-center z-50 sticky top-0 border-b border-gray-100 dark:border-gray-700 transition-colors">
           <div className="flex items-center gap-3">
             <button onClick={() => navigate(-1)} className="text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"><ArrowLeft className="w-6 h-6" /></button>
             <div onClick={() => navigate(`/user/${receiverId}`, { state: { user: { unique_id: receiverId, username: friendName } } })} className="flex items-center gap-3 cursor-pointer">
               <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm">{friendName.charAt(0)}</div>
               <div className="flex flex-col">
-                <h2 className="font-bold text-gray-900 dark:text-white text-[15px] hover:underline flex items-center gap-1">
+                <h3 className="font-bold text-gray-900 dark:text-white text-[16.5px] leading-tight flex items-center truncate max-w-[140px] sm:max-w-[200px]">
                   {friendName}
-                  {isMuted && <BellOff className="w-3.5 h-3.5 text-red-400" />}
-                </h2>
+                </h3>
                 {isTyping ? <span className="text-[11px] text-chatverse dark:text-indigo-400 font-bold italic animate-pulse">typing...</span> 
                  : (!hideLastSeen && <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">Online</span>)}
               </div>
@@ -309,7 +346,6 @@ export default function ChatScreen() {
             <button onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }} className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"><MoreVertical className="w-5 h-5" /></button>
             {showMenu && (
               <div className="absolute right-0 top-12 w-48 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[100]">
-                {/* Custom Personalization Options */}
                 <button onClick={() => { setShowMenu(false); setShowThemeModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
                   <Palette className="w-4 h-4 text-chatverse" /> Chat Theme
                 </button>
@@ -325,17 +361,55 @@ export default function ChatScreen() {
       )}
 
       {/* Messages Feed */}
-      <div className="flex-1 overflow-y-auto px-3 py-6 flex flex-col no-scrollbar">
-        {visibleMessages.map((msg, idx) => {
+      <div 
+        className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
+        onScroll={handleScroll}
+      >
+        {messages.map((msg, index) => {
+
           const isMe = msg.sender_id === currentUser.unique_id;
-          const isSelected = selectedMessages.some(m => m.id === msg.id);
           const hasReaction = !!msg.reaction;
+          const isSelected = selectedMessages.some(m => m.id === msg.id);
+          
+          // Date Separator Logic
+          const msgDate = new Date(msg.created_at || Date.now());
+          const prevMsgDate = index > 0 ? new Date(messages[index - 1].created_at || Date.now()) : null;
+          const showDateSeparator = !prevMsgDate || msgDate.toDateString() !== prevMsgDate.toDateString();
+
+          // Grouping Logic (Border Radius ke liye)
+          const isPrevSameSender = !showDateSeparator && index > 0 && messages[index - 1].sender_id === msg.sender_id;
+          const isNextSameSender = index < messages.length - 1 && messages[index + 1].sender_id === msg.sender_id && new Date(messages[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
+
+          // Dynamic Bubble Styling (WhatsApp style clustering)
+          let radiusClasses = 'rounded-2xl';
+          if (isMe) {
+            if (isPrevSameSender && isNextSameSender) radiusClasses = 'rounded-2xl rounded-tr-[4px] rounded-br-[4px]';
+            else if (isPrevSameSender) radiusClasses = 'rounded-2xl rounded-tr-[4px]';
+            else if (isNextSameSender) radiusClasses = 'rounded-2xl rounded-br-[4px]';
+            else radiusClasses = 'rounded-2xl rounded-tr-[4px]';
+          } else {
+            if (isPrevSameSender && isNextSameSender) radiusClasses = 'rounded-2xl rounded-tl-[4px] rounded-bl-[4px]';
+            else if (isPrevSameSender) radiusClasses = 'rounded-2xl rounded-tl-[4px]';
+            else if (isNextSameSender) radiusClasses = 'rounded-2xl rounded-bl-[4px]';
+            else radiusClasses = 'rounded-2xl rounded-tl-[4px]';
+          }
+
+          // Gap between messages
+          const marginClass = hasReaction ? 'mb-[24px]' : (isNextSameSender ? 'mb-[2px]' : 'mb-[12px]');
 
           return (
-            <div key={msg.id || idx} className={`w-full flex flex-col ${activeReactId === msg.id ? 'relative z-40' : 'relative z-0'}`}>
+            <div key={msg.id || index} className={`w-full flex flex-col ${activeReactId === msg.id ? 'relative z-40' : 'relative z-0'}`}>
               
+              {showDateSeparator && (
+                 <div className="w-full flex justify-center my-4 relative z-0">
+                    <span className="bg-gray-200/60 dark:bg-gray-800/60 backdrop-blur-sm text-gray-500 dark:text-gray-400 text-[11.5px] font-bold px-3.5 py-1 rounded-full shadow-sm z-10">
+                      {msgDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </span>
+                 </div>
+              )}
+
               {/* Unread Divider */}
-              {idx === firstUnreadIndex && unreadCount > 0 && (
+              {index === firstUnreadIndex && unreadCount > 0 && (
                 <div className="w-full flex justify-center my-4 relative z-0">
                   <div className="bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700 text-chatverse dark:text-indigo-400 text-[11px] font-black px-4 py-1.5 rounded-full z-10">
                     {unreadCount} UNREAD MESSAGE{unreadCount > 1 ? 'S' : ''}
@@ -344,9 +418,8 @@ export default function ChatScreen() {
                 </div>
               )}
 
-              <div className={`flex w-full ${hasReaction ? 'mb-[22px]' : 'mb-1.5'} group ${isMe ? 'justify-end' : 'justify-start'}`}>
+              <div className={`flex w-full ${marginClass} group ${isMe ? 'justify-end' : 'justify-start'}`}>
                 
-                {/* Quick Action Smile */}
                 {isMe && !msg.is_deleted_for_everyone && (
                   <div className="flex items-center gap-1 pr-2 opacity-0 group-hover:opacity-100 transition-opacity self-center">
                     <button onClick={(e) => { e.stopPropagation(); setActiveReactId(msg.id); }} className="p-1.5 text-gray-500 hover:text-chatverse bg-white/50 dark:bg-black/20 rounded-full backdrop-blur-sm"><Smile className="w-[18px] h-[18px]"/></button>
@@ -355,7 +428,6 @@ export default function ChatScreen() {
 
                 <div className="relative max-w-[80%] flex flex-col">
                   
-                  {/* Swipe Reply Icon */}
                   {swipingId === msg.id && (
                     <div className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
                          style={{ left: '-6px', opacity: Math.min(swipeOffset / 40, 1), transform: `scale(${Math.min(swipeOffset / 40, 1)})` }}>
@@ -363,7 +435,6 @@ export default function ChatScreen() {
                     </div>
                   )}
 
-                  {/* Main Bubble Area */}
                   <div className="relative flex flex-col z-20"
                        style={{ transform: swipingId === msg.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
                     
@@ -378,10 +449,10 @@ export default function ChatScreen() {
                       onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(e, msg); }}
                       onPointerLeave={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
                       className={`relative px-2.5 pt-1.5 pb-1 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
-                        isSelected ? 'bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 rounded-2xl' :
-                        msg.is_deleted_for_everyone ? 'bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 rounded-[18px]' 
-                        : isMe ? 'bg-chatverse text-white rounded-[18px] rounded-tr-[4px]' 
-                        : 'bg-white dark:bg-gray-800 border border-gray-100/50 dark:border-gray-700/50 text-gray-800 dark:text-gray-100 rounded-[18px] rounded-tl-[4px]'
+                        isSelected ? `bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 ${radiusClasses}` :
+                        msg.is_deleted_for_everyone ? `bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 ${radiusClasses}` 
+                        : isMe ? `bg-chatverse text-white ${radiusClasses}` 
+                        : `bg-white dark:bg-gray-800 border border-gray-100/50 dark:border-gray-700/50 text-gray-800 dark:text-gray-100 ${radiusClasses}`
                       }`}
                     >
                       
@@ -391,15 +462,13 @@ export default function ChatScreen() {
                         </div>
                       )}
                       
-                      {/* Invisible Spacer Trick for WhatsApp Time alignment */}
-                      <div className="relative text-[15px] leading-[1.4] break-words">
+                      <div className="relative text-[15.5px] leading-[1.4] break-words">
                         <span>{msg.content}</span>
                         {!msg.is_deleted_for_everyone && (
                           <span className={`inline-block h-[12px] ${isMe ? 'w-[75px]' : 'w-[52px]'}`}></span>
                         )}
                       </div>
 
-                      {/* Floating Timestamp bottom right */}
                       {!msg.is_deleted_for_everyone && (
                         <div className={`absolute bottom-1 right-2 flex items-center gap-[3px] text-[10px] font-medium select-none ${isMe ? 'text-indigo-100/90' : 'text-gray-400 dark:text-gray-500'}`}>
                           {msg.is_starred && <Star className="w-[10px] h-[10px] fill-current mr-0.5" />}
@@ -416,14 +485,12 @@ export default function ChatScreen() {
                       )}
                     </div>
 
-                    {/* Reaction Badge */}
                     {msg.reaction && !msg.is_deleted_for_everyone && (
                       <div className={`absolute -bottom-3.5 ${isMe ? 'right-4' : 'left-4'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-30 select-none flex items-center justify-center`}>
                         {msg.reaction}
                       </div>
                     )}
 
-                    {/* Emoji Picker */}
                     {activeReactId === msg.id && (
                       <div onClick={(e) => e.stopPropagation()} className={`absolute z-50 bottom-full mb-1 ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 shadow-xl border border-gray-100 dark:border-gray-700 p-2 flex gap-2 rounded-[20px] animate-slide-up`}>
                         {emojis.map(emoji => (
@@ -460,8 +527,18 @@ export default function ChatScreen() {
         <div ref={endOfMessagesRef} className="h-4" />
       </div>
 
-      {/* Input Field & Reply Banner Control */}
-      <div className="bg-white dark:bg-gray-800 flex flex-col border-t border-gray-100/60 dark:border-gray-700 shadow-md z-10 relative">
+      {showScrollButton && (
+        <div className="absolute bottom-[80px] right-4 z-50 animate-slide-up">
+          <button
+            onClick={scrollToBottom}
+            className="w-10 h-10 bg-white dark:bg-gray-800 text-chatverse shadow-[0_5px_15px_rgba(0,0,0,0.15)] rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all border border-gray-100 dark:border-gray-700"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white dark:bg-gray-800 flex flex-col border-t border-gray-100/60 dark:border-gray-700 shadow-md z-10 relative pb-[calc(env(safe-area-inset-bottom)+0px)]">
         
         {replyingTo && (
           <div className="bg-gray-50 dark:bg-gray-700/50 px-4 py-2 border-l-4 border-chatverse flex justify-between items-center text-sm shadow-sm relative z-0">
@@ -483,7 +560,7 @@ export default function ChatScreen() {
           </div>
         )}
 
-        <div className="px-3 py-3 flex items-end gap-2 pb-4 z-10 bg-white dark:bg-gray-800">
+        <div className="px-3 py-3 flex items-end gap-2 z-10 bg-white dark:bg-gray-800">
           <button 
             onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); }} 
             className={`p-2.5 rounded-full transition-colors ${showEmojiPicker ? 'bg-indigo-50 dark:bg-indigo-900/30 text-chatverse' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
@@ -493,12 +570,12 @@ export default function ChatScreen() {
 
           <textarea 
             value={message} onChange={handleTyping} placeholder="Message..." 
-            className="flex-1 max-h-28 bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400" 
+            className="flex-1 max-h-28 bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400" 
             rows="1" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
           />
           <button 
             onClick={() => {
-              if (window.navigator?.vibrate) window.navigator.vibrate(15); // Haptic Feedback
+              if (window.navigator?.vibrate) window.navigator.vibrate(15); 
               handleSend();
             }} 
             disabled={!message.trim()} 
@@ -509,9 +586,6 @@ export default function ChatScreen() {
         </div>
       </div>
 
-      {/* --- Personalization Modals --- */}
-      
-      {/* 1. Theme Modal */}
       {showThemeModal && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowThemeModal(false)}>
           <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
@@ -540,7 +614,6 @@ export default function ChatScreen() {
         </div>
       )}
 
-      {/* 2. Sound Modal */}
       {showSoundModal && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowSoundModal(false)}>
           <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>

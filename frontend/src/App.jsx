@@ -25,6 +25,22 @@ function App() {
   // ==========================================
   // APP INITIALIZATION & GLOBAL DARK MODE
   // ==========================================
+
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const handleOffline = () => setIsOffline(true);
+    const handleOnline = () => setIsOffline(false);
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
+
   useEffect(() => {
     const token = localStorage.getItem('chatverse_token');
     const lockSetting = localStorage.getItem('chatverse_applock') === 'true';
@@ -72,6 +88,14 @@ function App() {
         
         {/* Faux iPhone Notch (Only visible on desktop/sm screens) */}
         <div className="hidden sm:block absolute top-0 left-1/2 -translate-x-1/2 w-[120px] h-[24px] bg-gray-900 dark:bg-gray-800 rounded-b-[16px] z-[999]"></div>
+
+        {/* NAYA CODE: OFFLINE BANNER UI */}
+        {isOffline && (
+          <div className="absolute top-0 left-0 w-full bg-red-500/95 backdrop-blur-sm text-white text-[12px] font-bold py-1.5 flex justify-center items-center gap-2 z-[9999] shadow-md transition-all duration-300">
+            <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+            Waiting for network...
+          </div>
+        )}
 
         <Routes>
           <Route path="/" element={<Navigate to="/home" />} />
