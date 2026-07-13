@@ -19,32 +19,6 @@ export default function ChatScreen() {
   const isMuted = localStorage.getItem(`cv_mute_${receiverId}`) === 'true';
   const hasCustomPrivacy = localStorage.getItem(`cv_privacy_${receiverId}`) === 'true';
 
-  // ==========================================
-  // NAYA CODE: KEYBOARD GLITCH FIX 
-  // ==========================================
-  const [viewportHeight, setViewportHeight] = useState('100dvh');
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.visualViewport) {
-        // Keyboard open/close hone par exact screen height set karega
-        setViewportHeight(`${window.visualViewport.height}px`);
-        // Keyboard open hone par chat ko automatically neeche scroll karega
-        setTimeout(() => {
-          endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
-      }
-    };
-
-    window.visualViewport?.addEventListener('resize', handleResize);
-    handleResize(); // Component load hote hi initial height set karega
-
-    return () => {
-      window.visualViewport?.removeEventListener('resize', handleResize);
-    };
-  }, []);
-  // ==========================================
-
   // Ultra Personalization States
   const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
   const [showThemeModal, setShowThemeModal] = useState(false);
@@ -292,8 +266,7 @@ export default function ChatScreen() {
 
   return (
     <div 
-      className={`w-full flex flex-col relative transition-colors overflow-hidden ${getThemeClasses()}`} 
-      style={{ height: viewportHeight }}
+      className={`h-full w-full flex flex-col relative transition-colors ${getThemeClasses()}`} 
       onClick={handleScreenClick}
     >
       
