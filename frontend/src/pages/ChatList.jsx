@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, UserPlus, Loader, MessageSquare, ChevronRight, Star, ArrowLeft } from 'lucide-react';
+import { Search, UserPlus, Loader, MessageSquare, ChevronRight, Star, ArrowLeft, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import BottomNav from '../components/BottomNav';
@@ -23,19 +23,15 @@ export default function ChatList() {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { unique_id: '' };
   
-  // Search and Chat List States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [recentChats, setRecentChats] = useState([]);
   const [loading, setLoading] = useState(false);
-  
-  const searchInputRef = useRef(null); // Used to focus search bar
+  const searchInputRef = useRef(null);
 
-  // NEW: Global Typing States
   const [typingUsers, setTypingUsers] = useState({});
   const typingTimeouts = useRef({});
 
-  // NEW: Friends Modal States
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [friendsList, setFriendsList] = useState([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -49,12 +45,9 @@ export default function ChatList() {
 
   useEffect(() => {
     fetchRecentChats();
-    
-    // Live Socket Connection
     const newSocket = io(SOCKET_URL);
     newSocket.emit('join', currentUser.unique_id);
 
-    // NEW: Offline Sync Logic
     newSocket.on('connect', () => {
       newSocket.emit('sync_messages', currentUser.unique_id);
     });
@@ -66,7 +59,6 @@ export default function ChatList() {
     newSocket.on('receive_message', () => { fetchRecentChats(); });
     newSocket.on('message_updated', () => { fetchRecentChats(); });
 
-    // NEW: Catch Global Typing Event
     newSocket.on('typing', (senderId) => {
       setTypingUsers(prev => ({ ...prev, [senderId]: true }));
       if (typingTimeouts.current[senderId]) clearTimeout(typingTimeouts.current[senderId]);
@@ -91,7 +83,6 @@ export default function ChatList() {
     return () => clearTimeout(delay);
   }, [searchQuery]);
 
-  // Open the "New Chat" Modal and fetch accepted friends
   const handleOpenFriendsModal = async () => {
     setShowFriendsModal(true);
     setFriendsLoading(true);
@@ -117,7 +108,6 @@ export default function ChatList() {
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
       
-      {/* HEADER SECTION */}
       <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-8 pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Messages</h1>
@@ -136,7 +126,6 @@ export default function ChatList() {
         </div>
       </div>
 
-      {/* CHAT LIST FEED */}
       <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar pb-24 pt-2">
         {loading ? (
            <div className="flex justify-center py-10"><Loader className="w-6 h-6 text-chatverse animate-spin" /></div>
@@ -148,7 +137,10 @@ export default function ChatList() {
                 <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg uppercase shadow-sm">{user.username.charAt(0)}</div>
                 <div className="flex-1">
                   <div className="flex items-center gap-1.5">
-                    <h3 className="font-bold text-gray-900 dark:text-white text-[16px]">{user.username}</h3>
+                    <h3 className="font-bold text-gray-900 dark:text-white text-[16px] flex items-center">
+                      {user.username}
+                      {user.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
+                    </h3>
                     {localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true' && <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />}
                   </div>
                   <p className="text-[14px] text-gray-500 dark:text-gray-400 font-medium">@{user.unique_id}</p>
@@ -190,7 +182,10 @@ export default function ChatList() {
                   <div className="flex-1 min-w-0 pr-1">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                         <h3 className={`text-[16px] truncate ${isUnread ? 'font-black text-gray-900 dark:text-white' : 'font-bold text-gray-900 dark:text-gray-100'}`}>{user.username}</h3>
+                         <h3 className={`text-[16px] truncate flex items-center ${isUnread ? 'font-black text-gray-900 dark:text-white' : 'font-bold text-gray-900 dark:text-gray-100'}`}>
+                           {user.username}
+                           {user.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
+                         </h3>
                          {hasStar && <span className="text-[9px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-[4px] leading-none tracking-wide">PINNED</span>}
                       </div>
                       <span className={`text-[11.5px] whitespace-nowrap ${isUnread ? 'font-bold text-chatverse dark:text-indigo-400' : 'font-medium text-gray-400 dark:text-gray-500'}`}>
@@ -199,7 +194,6 @@ export default function ChatList() {
                     </div>
                     
                     <div className="flex items-center justify-between mt-0.5">
-                      {/* NEW: Global Typing Indicator Check */}
                       <p className={`text-[14px] truncate max-w-[210px] ${isUnread ? 'font-bold text-gray-800 dark:text-gray-200' : 'font-medium text-gray-500 dark:text-gray-400'}`}>
                         {typingUsers[user.unique_id] ? (
                           <span className="font-bold text-[#4ADE80] italic">typing...</span>
@@ -229,11 +223,8 @@ export default function ChatList() {
         )}
       </div>
 
-      {/* NEW: WHATSAPP-STYLE FRIENDS LIST MODAL (FULL SCREEN OVERLAY) */}
       {showFriendsModal && (
         <div className="absolute inset-0 z-[100] bg-[#f4f6f8] dark:bg-gray-900 flex flex-col animate-slide-up">
-          
-          {/* Modal Header */}
           <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm flex items-center gap-4">
             <button onClick={() => setShowFriendsModal(false)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
               <ArrowLeft className="w-[22px] h-[22px]" />
@@ -244,10 +235,7 @@ export default function ChatList() {
             </div>
           </div>
 
-          {/* Modal Content */}
           <div className="flex-1 overflow-y-auto no-scrollbar">
-             
-             {/* "Find New Friend" Button (Redirects focus to main search) */}
              <div 
                onClick={() => { setShowFriendsModal(false); setTimeout(() => searchInputRef.current?.focus(), 100); }}
                className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer border-b border-gray-100 dark:border-gray-700/50 bg-white dark:bg-gray-800 transition-colors"
@@ -260,7 +248,6 @@ export default function ChatList() {
 
              <div className="px-6 py-3 text-[12px] font-black text-gray-400 uppercase tracking-wider">Your Friends</div>
              
-             {/* Friends List Render */}
              {friendsLoading ? (
                <div className="flex justify-center py-8"><Loader className="w-6 h-6 text-chatverse animate-spin" /></div>
              ) : friendsList.length === 0 ? (
@@ -279,7 +266,10 @@ export default function ChatList() {
                          {friend.username.charAt(0)}
                       </div>
                       <div className="flex-1">
-                         <h3 className="font-bold text-[16px] text-gray-900 dark:text-white">{friend.username}</h3>
+                         <h3 className="font-bold text-[16px] text-gray-900 dark:text-white flex items-center">
+                           {friend.username}
+                           {friend.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
+                         </h3>
                          <p className="text-[14px] text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{friend.bio}</p>
                       </div>
                    </div>

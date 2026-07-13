@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Send, MoreVertical, Trash2, Edit3, Copy, Image as ImageIcon, X } from 'lucide-react';
+import { Heart, MessageCircle, Send, MoreVertical, Trash2, Edit3, Copy, Image as ImageIcon, X, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
@@ -29,34 +29,28 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
   const [likeCount, setLikeCount] = useState(Number(post.like_count) || 0); 
   const [commentCount, setCommentCount] = useState(Number(post.comment_count) || 0);
   
-  // Comments States
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const commentInputRef = useRef(null);
   
-  // Advanced Comment Features States
   const [replyingTo, setReplyingTo] = useState(null); 
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editCommentText, setEditCommentText] = useState('');
 
-  // Likes Modal States
   const [showLikesModal, setShowLikesModal] = useState(false);
   const [likedUsers, setLikedUsers] = useState([]);
   const [likesLoading, setLikesLoading] = useState(false);
 
-  // Post Menu States
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
 
-  // --- Profile Navigation ---
   const handleProfileClick = (id, username) => {
     navigate(`/user/${id}`, { state: { user: { unique_id: id, username: username } } });
   };
 
-  // --- Post Like Management ---
   const handleLikeToggle = async () => {
     const prevLiked = liked;
     setLiked(!prevLiked);
@@ -75,7 +69,6 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
     setLikesLoading(false);
   };
 
-  // --- Comments Data Management ---
   const toggleComments = async () => {
     setShowComments(!showComments);
     if (!showComments && comments.length === 0) {
@@ -99,7 +92,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
       const res = await api.post(`/posts/${post.id}/comments`, { comment: text, parent_id: parentId });
       setComments([...comments, { 
         id: res.data.id, comment: text, username: currentUser.username, 
-        unique_id: currentUser.unique_id, parent_id: parentId, created_at: res.data.created_at, has_liked: false, like_count: 0 
+        unique_id: currentUser.unique_id, is_verified: currentUser.is_verified, parent_id: parentId, created_at: res.data.created_at, has_liked: false, like_count: 0 
       }]);
       setReplyingTo(null);
     } catch (error) { alert("Failed to add comment"); }
@@ -136,7 +129,6 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
     commentInputRef.current?.focus();
   };
 
-  // FIX: Converted CommentNode to an inline function to prevent unmounting and focus loss during typing
   const renderComment = (c, isReply = false) => {
     const isCommentAuthor = c.unique_id === currentUser.unique_id;
     return (
@@ -160,8 +152,11 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
             </div>
           ) : (
             <div className="bg-white dark:bg-gray-700 px-3.5 py-2.5 rounded-[16px] rounded-tl-[4px] shadow-sm border border-gray-50 dark:border-gray-600 w-fit max-w-full break-words">
-              <span onClick={() => handleProfileClick(c.unique_id, c.username)} className="font-bold text-[15px] text-gray-900 dark:text-gray-100 cursor-pointer hover:underline pr-2">{c.username}</span>
-              <span className="text-[14px] text-gray-800 dark:text-gray-200 leading-snug">{c.comment}</span>
+              <span onClick={() => handleProfileClick(c.unique_id, c.username)} className="font-bold text-[15px] text-gray-900 dark:text-gray-100 cursor-pointer hover:underline pr-2 flex items-center gap-1">
+                {c.username}
+                {c.is_verified && <BadgeCheck className="w-[14px] h-[14px] text-[#1d9bf0] shrink-0" />}
+              </span>
+              <span className="text-[14px] text-gray-800 dark:text-gray-200 leading-snug block">{c.comment}</span>
             </div>
           )}
           
@@ -190,7 +185,6 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
     );
   };
 
-  // --- Post Edits ---
   const handleEditSave = async () => {
     if (!editContent.trim()) return;
     try {
@@ -228,7 +222,10 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
             </div>
           </div>
           <div className="flex flex-col">
-            <h3 className="font-bold text-gray-900 dark:text-white text-[15px]">{post.username}</h3>
+            <h3 className="font-bold text-gray-900 dark:text-white text-[15px] flex items-center gap-1">
+              {post.username}
+              {post.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0]" />}
+            </h3>
             <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500">{timeAgo(post.created_at)}</p>
           </div>
         </div>
@@ -309,7 +306,10 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
                 <div key={u.unique_id} onClick={() => { setShowLikesModal(false); handleProfileClick(u.unique_id, u.username); }} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-2xl cursor-pointer transition-colors">
                   <div className="w-11 h-11 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">{u.username.charAt(0)}</div>
                   <div className="flex-1">
-                    <p className="font-bold text-gray-900 dark:text-white text-[15px]">{u.username}</p>
+                    <p className="font-bold text-gray-900 dark:text-white text-[15px] flex items-center gap-1">
+                      {u.username}
+                      {u.is_verified && <BadgeCheck className="w-[14px] h-[14px] text-[#1d9bf0]" />}
+                    </p>
                     <p className="text-[12.5px] text-gray-500 font-medium">@{u.unique_id}</p>
                   </div>
                 </div>
@@ -319,7 +319,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
         </div>
       )}
 
-      {/* COMMENTS AREA WITH NESTED REPLIES */}
+      {/* COMMENTS AREA */}
       {showComments && (
         <div className="mt-4 animate-slide-down bg-gray-50/50 dark:bg-gray-800/50 p-4 rounded-[20px] border border-gray-100 dark:border-gray-700">
           {loadingComments ? (
@@ -339,7 +339,6 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
             </div>
           )}
 
-          {/* Reply Banner */}
           {replyingTo && (
             <div className="bg-indigo-50/80 dark:bg-indigo-900/30 px-4 py-2 border-l-4 border-chatverse flex justify-between items-center text-[12px] mb-2 mx-1 rounded-r-lg shadow-sm">
                <span className="text-gray-600 dark:text-indigo-200 font-medium">Replying to <span className="font-bold text-chatverse dark:text-indigo-300">@{replyingTo.username}</span></span>

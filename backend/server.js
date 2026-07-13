@@ -22,7 +22,7 @@ const server = http.createServer(app);
 const initializeDatabase = async () => {
   try {
     await db.query(`
-      CREATE TABLE IF NOT EXISTS users (unique_id TEXT PRIMARY KEY, username TEXT NOT NULL, email TEXT UNIQUE NOT NULL, mobile TEXT, age INTEGER, gender TEXT, password_hash TEXT NOT NULL, bio TEXT DEFAULT 'Available on ChatVerse ✨');
+      CREATE TABLE IF NOT EXISTS users (unique_id TEXT PRIMARY KEY, username TEXT NOT NULL, email TEXT UNIQUE NOT NULL, mobile TEXT, age INTEGER, gender TEXT, password_hash TEXT NOT NULL, bio TEXT DEFAULT 'Available on ChatVerse ✨', is_verified BOOLEAN DEFAULT FALSE);
       CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, content TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS friend_requests (id SERIAL PRIMARY KEY, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, receiver_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, receiver_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, content TEXT NOT NULL, status TEXT DEFAULT 'sent', reply_to_id INTEGER, reply_content TEXT, reaction TEXT, is_starred BOOLEAN DEFAULT FALSE, is_deleted_for_me BOOLEAN DEFAULT FALSE, is_deleted_for_everyone BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
@@ -32,7 +32,11 @@ const initializeDatabase = async () => {
       CREATE TABLE IF NOT EXISTS post_comment_likes (comment_id INTEGER REFERENCES post_comments(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, PRIMARY KEY (comment_id, user_id));
       CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, type TEXT NOT NULL, reference_id INTEGER, content TEXT, is_read BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     `);
-    console.log("✅ Database Tables Auto-Synced!");
+
+    // Forcefully add the 'is_verified' column to EXISTING databases
+    await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;`);
+
+    console.log("✅ Database Tables Auto-Synced! Verified Column Active.");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
 initializeDatabase();
@@ -58,7 +62,7 @@ app.post('/api/auth/register', async (req, res) => {
     const userCheck = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $2', [unique_id, email]);
     if (userCheck.rows.length > 0) return res.status(400).json({ error: 'ID or Email exists!' });
     const password_hash = await bcrypt.hash(password, await bcrypt.genSalt(10));
-    const newUser = await db.query(`INSERT INTO users (unique_id, username, email, mobile, age, gender, password_hash) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING unique_id, username`, [unique_id, unique_id, email, mobile, age, gender, password_hash]);
+    const newUser = await db.query(`INSERT INTO users (unique_id, username, email, mobile, age, gender, password_hash) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING unique_id, username, is_verified`, [unique_id, unique_id, email, mobile, age, gender, password_hash]);
     res.status(201).json({ message: 'Account created!', user: newUser.rows[0] });
   } catch (err) { res.status(500).json({ error: 'Error during signup' }); }
 });
@@ -68,13 +72,13 @@ app.post('/api/auth/login', async (req, res) => {
     if (user.rows.length === 0) return res.status(400).json({ error: 'User not found!' });
     if (!await bcrypt.compare(req.body.password, user.rows[0].password_hash)) return res.status(400).json({ error: 'Incorrect password!' });
     const token = jwt.sign({ id: user.rows[0].unique_id }, process.env.JWT_SECRET || 'chatverse_super_secret_key_2026', { expiresIn: '7d' });
-    res.status(200).json({ message: 'Login successful!', token, user: { unique_id: user.rows[0].unique_id, username: user.rows[0].username, bio: user.rows[0].bio } });
+    res.status(200).json({ message: 'Login successful!', token, user: { unique_id: user.rows[0].unique_id, username: user.rows[0].username, bio: user.rows[0].bio, is_verified: user.rows[0].is_verified } });
   } catch (err) { res.status(500).json({ error: 'Error during login' }); }
 });
 
 // --- USER APIs ---
 app.get('/api/users/search', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT unique_id, username, bio FROM users WHERE unique_id ILIKE $1 AND unique_id != $2 AND unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $2) AND unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $2) LIMIT 10`, [`%${req.query.query}%`, req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error searching' }); }
+  try { res.status(200).json((await db.query(`SELECT unique_id, username, bio, is_verified FROM users WHERE unique_id ILIKE $1 AND unique_id != $2 AND unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $2) AND unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $2) LIMIT 10`, [`%${req.query.query}%`, req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error searching' }); }
 });
 app.get('/api/users/me/stats', authenticateToken, async (req, res) => {
   try { res.status(200).json({ friendsCount: parseInt((await db.query(`SELECT COUNT(DISTINCT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END) FROM friend_requests WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'`, [req.user.id])).rows[0].count) }); } catch (err) { res.status(500).json({ error: 'Error stats' }); }
@@ -83,21 +87,26 @@ app.put('/api/users/me/bio', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE users SET bio = $1 WHERE unique_id = $2`, [req.body.bio, req.user.id]); res.status(200).json({ message: 'Bio updated' }); } catch (err) { res.status(500).json({ error: 'Error updating bio' }); }
 });
 
-// NEW: STRICT GDPR DELETE ACCOUNT API WITH PASSWORD VERIFICATION
+// NEW: GET VERIFIED API
+app.put('/api/users/me/verify', authenticateToken, async (req, res) => {
+  try {
+    await db.query(`UPDATE users SET is_verified = TRUE WHERE unique_id = $1`, [req.user.id]);
+    res.status(200).json({ message: 'Account verified successfully!' });
+  } catch (err) { 
+    console.error(err);
+    res.status(500).json({ error: 'Error verifying account' }); 
+  }
+});
+
+// STRICT GDPR DELETE ACCOUNT API
 app.delete('/api/users/me', authenticateToken, async (req, res) => {
   try {
     const { password } = req.body;
     if (!password) return res.status(400).json({ error: 'Password is required to delete account' });
-
-    // Fetch hashed password
     const user = await db.query('SELECT password_hash FROM users WHERE unique_id = $1', [req.user.id]);
     if (user.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-
-    // Verify Password
     const isValid = await bcrypt.compare(password, user.rows[0].password_hash);
     if (!isValid) return res.status(400).json({ error: 'Incorrect password!' });
-
-    // Delete User (ON DELETE CASCADE will automatically wipe posts, comments, likes, messages, requests)
     await db.query('DELETE FROM users WHERE unique_id = $1', [req.user.id]);
     res.status(200).json({ message: 'Account permanently deleted' });
   } catch (err) { 
@@ -115,7 +124,7 @@ app.post('/api/users/block', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error blocking user' }); }
 });
 app.get('/api/users/blocked', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT b.blocked_id, u.username FROM blocked_users b JOIN users u ON b.blocked_id = u.unique_id WHERE b.blocker_id = $1`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching blocked users' }); }
+  try { res.status(200).json((await db.query(`SELECT b.blocked_id, u.username, u.is_verified FROM blocked_users b JOIN users u ON b.blocked_id = u.unique_id WHERE b.blocker_id = $1`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching blocked users' }); }
 });
 app.delete('/api/users/unblock/:id', authenticateToken, async (req, res) => {
   try { await db.query(`DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2`, [req.user.id, req.params.id]); res.status(200).json({ message: 'User unblocked successfully' }); } catch (err) { res.status(500).json({ error: 'Error unblocking user' }); }
@@ -134,8 +143,8 @@ app.put('/api/notifications/read', authenticateToken, async (req, res) => {
 });
 app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
-    const fReqs = await db.query(`SELECT fr.id as ref_id, u.unique_id, u.username, fr.created_at, 'friend_request' as type, FALSE as is_read, '' as content FROM friend_requests fr JOIN users u ON fr.sender_id = u.unique_id WHERE fr.receiver_id = $1 AND fr.status = 'pending'`, [req.user.id]);
-    const notifs = await db.query(`SELECT n.id as notif_id, n.reference_id as ref_id, u.unique_id, u.username, n.created_at, n.type, n.is_read, n.content FROM notifications n JOIN users u ON n.sender_id = u.unique_id WHERE n.user_id = $1 ORDER BY n.created_at DESC LIMIT 50`, [req.user.id]);
+    const fReqs = await db.query(`SELECT fr.id as ref_id, u.unique_id, u.username, u.is_verified, fr.created_at, 'friend_request' as type, FALSE as is_read, '' as content FROM friend_requests fr JOIN users u ON fr.sender_id = u.unique_id WHERE fr.receiver_id = $1 AND fr.status = 'pending'`, [req.user.id]);
+    const notifs = await db.query(`SELECT n.id as notif_id, n.reference_id as ref_id, u.unique_id, u.username, u.is_verified, n.created_at, n.type, n.is_read, n.content FROM notifications n JOIN users u ON n.sender_id = u.unique_id WHERE n.user_id = $1 ORDER BY n.created_at DESC LIMIT 50`, [req.user.id]);
     res.status(200).json([...fReqs.rows, ...notifs.rows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
   } catch (err) { res.status(500).json({ error: 'Error fetching notifications' }); }
 });
@@ -162,7 +171,7 @@ app.get('/api/friends/status/:otherUserId', authenticateToken, async (req, res) 
 app.get('/api/friends', authenticateToken, async (req, res) => {
   try {
     const query = `
-      SELECT u.unique_id, u.username, u.bio 
+      SELECT u.unique_id, u.username, u.bio, u.is_verified 
       FROM friend_requests fr 
       JOIN users u ON (u.unique_id = fr.sender_id OR u.unique_id = fr.receiver_id) 
       WHERE (fr.sender_id = $1 OR fr.receiver_id = $1) 
@@ -191,10 +200,10 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/posts', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT p.id, p.content, p.created_at, u.unique_id, u.username, (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count FROM posts p JOIN users u ON p.user_id = u.unique_id ORDER BY p.created_at DESC LIMIT 50`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching' }); }
+  try { res.status(200).json((await db.query(`SELECT p.id, p.content, p.created_at, u.unique_id, u.username, u.is_verified, (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count FROM posts p JOIN users u ON p.user_id = u.unique_id ORDER BY p.created_at DESC LIMIT 50`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching' }); }
 });
 app.get('/api/posts/user/:id', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT p.id, p.content, p.created_at, u.unique_id, u.username, (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count FROM posts p JOIN users u ON p.user_id = u.unique_id WHERE p.user_id = $2 ORDER BY p.created_at DESC`, [req.user.id, req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error user posts' }); }
+  try { res.status(200).json((await db.query(`SELECT p.id, p.content, p.created_at, u.unique_id, u.username, u.is_verified, (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count FROM posts p JOIN users u ON p.user_id = u.unique_id WHERE p.user_id = $2 ORDER BY p.created_at DESC`, [req.user.id, req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error user posts' }); }
 });
 app.put('/api/posts/:id', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE posts SET content = $1 WHERE id = $2 AND user_id = $3`, [req.body.content, req.params.id, req.user.id]); res.status(200).json({ message: 'Updated' }); } catch (err) { res.status(500).json({ error: 'Error editing post' }); }
@@ -221,11 +230,11 @@ app.post('/api/posts/:id/like', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error like' }); }
 });
 app.get('/api/posts/:id/likes', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT u.unique_id, u.username, u.bio FROM post_likes pl JOIN users u ON pl.user_id = u.unique_id WHERE pl.post_id = $1`, [req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching likes list' }); }
+  try { res.status(200).json((await db.query(`SELECT u.unique_id, u.username, u.bio, u.is_verified FROM post_likes pl JOIN users u ON pl.user_id = u.unique_id WHERE pl.post_id = $1`, [req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching likes list' }); }
 });
 
 app.get('/api/posts/:id/comments', authenticateToken, async (req, res) => {
-  try { res.json((await db.query(`SELECT c.id, c.comment, c.parent_id, u.username, u.unique_id, c.created_at, (SELECT COUNT(*) FROM post_comment_likes WHERE comment_id = c.id) as like_count, EXISTS(SELECT 1 FROM post_comment_likes WHERE comment_id = c.id AND user_id = $2) as has_liked FROM post_comments c JOIN users u ON c.user_id = u.unique_id WHERE c.post_id = $1 ORDER BY c.created_at ASC`, [req.params.id, req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error comments' }); }
+  try { res.json((await db.query(`SELECT c.id, c.comment, c.parent_id, u.username, u.unique_id, u.is_verified, c.created_at, (SELECT COUNT(*) FROM post_comment_likes WHERE comment_id = c.id) as like_count, EXISTS(SELECT 1 FROM post_comment_likes WHERE comment_id = c.id AND user_id = $2) as has_liked FROM post_comments c JOIN users u ON c.user_id = u.unique_id WHERE c.post_id = $1 ORDER BY c.created_at ASC`, [req.params.id, req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error comments' }); }
 });
 
 app.post('/api/posts/:id/comments', authenticateToken, async (req, res) => {
@@ -305,6 +314,7 @@ app.get('/api/chats/recent', authenticateToken, async (req, res) => {
       SELECT 
         u.unique_id, 
         u.username,
+        u.is_verified,
         rm.content AS last_message,
         rm.created_at AS last_message_time,
         rm.reaction,
@@ -370,6 +380,7 @@ io.on('connection', (socket) => {
         SELECT 
           u.unique_id, 
           u.username,
+          u.is_verified,
           rm.content AS last_message,
           rm.created_at AS last_message_time,
           rm.reaction,
@@ -387,6 +398,12 @@ io.on('connection', (socket) => {
       const result = await db.query(query, [userId]);
       socket.emit('sync_complete', result.rows);
     } catch (err) { console.error("Error syncing messages:", err); }
+  });
+
+  socket.on('change_chat_theme', ({ themeId, senderId, receiverId }) => {
+    if (onlineUsers.get(receiverId)) {
+       io.to(onlineUsers.get(receiverId)).emit('theme_updated', { themeId });
+    }
   });
 
   socket.on('send_message', async (data) => {

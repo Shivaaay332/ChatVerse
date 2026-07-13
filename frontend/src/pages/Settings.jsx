@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Sun, Moon, Lock, EyeOff, LogOut, UserX, ChevronRight, Shield, Delete, X, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Sun, Moon, Lock, EyeOff, LogOut, UserX, ChevronRight, Shield, Delete, X, AlertTriangle, CaseUpper, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
@@ -16,18 +16,21 @@ const ToggleSwitch = ({ isOn, onToggle }) => (
 
 export default function Settings() {
   const navigate = useNavigate();
+  const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || {};
 
-  // Settings States (Synced with LocalStorage)
+  // Settings States
   const [darkMode, setDarkMode] = useState(localStorage.getItem('chatverse_darkmode') === 'true');
   const [appLock, setAppLock] = useState(localStorage.getItem('chatverse_applock') === 'true');
   const [hideLastSeen, setHideLastSeen] = useState(localStorage.getItem('chatverse_hide_lastseen') === 'true');
   const [hideReadReceipts, setHideReadReceipts] = useState(localStorage.getItem('chatverse_hide_readreceipts') === 'true');
+  
+  const [fontSizeIndex, setFontSizeIndex] = useState(parseInt(localStorage.getItem('chatverse_fontsize') || '1'));
 
   // App Lock Setup States
   const [showPinModal, setShowPinModal] = useState(false);
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
-  const [step, setStep] = useState(1); // 1 = Set PIN, 2 = Confirm PIN
+  const [step, setStep] = useState(1);
   const [pinError, setPinError] = useState(false);
 
   // Delete Account States
@@ -46,6 +49,14 @@ export default function Settings() {
     } else {
       document.documentElement.classList.remove('dark');
     }
+  };
+
+  const handleFontSizeChange = (e) => {
+    const val = parseInt(e.target.value);
+    setFontSizeIndex(val);
+    localStorage.setItem('chatverse_fontsize', val);
+    const sizes = ['14px', '16px', '18px'];
+    document.documentElement.style.fontSize = sizes[val];
   };
 
   const handleAppLock = () => {
@@ -74,8 +85,26 @@ export default function Settings() {
     localStorage.setItem('chatverse_hide_readreceipts', newValue);
   };
 
+  // NEW: GET VERIFIED LOGIC
+  const handleGetVerified = async () => {
+    if (currentUser.is_verified) {
+      alert("You are already verified! ✅");
+      return;
+    }
+    try {
+      await api.put('/users/me/verify');
+      const updatedUser = { ...currentUser, is_verified: true };
+      localStorage.setItem('chatverse_user', JSON.stringify(updatedUser));
+      alert("Congratulations! You are now Verified! 🎉");
+      window.location.reload(); // Reload immediately to show ticks everywhere
+    } catch (err) {
+      alert("Failed to get verified. Please try again.");
+    }
+  };
+
   const handleLogout = () => {
     localStorage.clear();
+    document.documentElement.style.fontSize = '16px'; 
     navigate('/');
   };
 
@@ -114,7 +143,7 @@ export default function Settings() {
     }
   }, [pin, step, confirmPin]);
 
-  // --- Delete Account Logic (GDPR Compliant) ---
+  // --- Delete Account Logic ---
   const handleDeleteAccount = async () => {
     if (!deletePassword) {
       setDeleteError('Password is required');
@@ -125,6 +154,7 @@ export default function Settings() {
     try {
       await api.delete('/users/me', { data: { password: deletePassword } });
       localStorage.clear();
+      document.documentElement.style.fontSize = '16px';
       navigate('/');
     } catch (err) {
       setDeleteError(err.response?.data?.error || 'Failed to delete account');
@@ -144,6 +174,27 @@ export default function Settings() {
       </div>
 
       <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar pb-24 px-4 py-4 space-y-6">
+
+        {/* Premium / Verification Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-50 dark:border-gray-700 transition-colors">
+          <h2 className="text-[12px] font-black text-gray-400 dark:text-gray-500 tracking-widest uppercase mb-4 pl-1">Premium Features</h2>
+          <div onClick={handleGetVerified} className="flex items-center justify-between py-2 cursor-pointer group">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center text-[#1d9bf0]">
+                <BadgeCheck className="w-5 h-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-gray-900 dark:text-white text-[15px]">
+                  {currentUser.is_verified ? "Verified Account" : "Get Verified Badge"}
+                </span>
+                <span className="text-[12px] text-gray-500">
+                  {currentUser.is_verified ? "You have a premium blue tick" : "Show a blue tick next to your name"}
+                </span>
+              </div>
+            </div>
+            {!currentUser.is_verified && <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#1d9bf0] transition-colors" />}
+          </div>
+        </div>
         
         {/* Appearance Section */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-50 dark:border-gray-700 transition-colors">
@@ -156,6 +207,39 @@ export default function Settings() {
               <span className="font-bold text-gray-900 dark:text-white text-[15px]">Dark Mode</span>
             </div>
             <ToggleSwitch isOn={darkMode} onToggle={handleDarkMode} />
+          </div>
+        </div>
+
+        {/* Accessibility / Font Size Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-50 dark:border-gray-700 transition-colors">
+          <h2 className="text-[12px] font-black text-gray-400 dark:text-gray-500 tracking-widest uppercase mb-4 pl-1">Accessibility</h2>
+          <div className="py-2">
+            <div className="flex items-center gap-4 mb-5">
+              <div className="w-10 h-10 bg-purple-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-purple-500 dark:text-purple-400">
+                <CaseUpper className="w-5 h-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-gray-900 dark:text-white text-[15px]">Font Size</span>
+                <span className="text-[12px] text-gray-500">Adjust the app's text scale</span>
+              </div>
+            </div>
+            
+            <div className="px-2">
+              <input 
+                type="range" 
+                min="0" 
+                max="2" 
+                step="1" 
+                value={fontSizeIndex} 
+                onChange={handleFontSizeChange}
+                className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-chatverse"
+              />
+              <div className="flex justify-between mt-2 px-1 text-[11px] font-bold text-gray-400">
+                <span>Small</span>
+                <span>Medium</span>
+                <span>Large</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -220,7 +304,6 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* New Delete Account Button */}
           <div onClick={() => { setDeletePassword(''); setDeleteError(''); setShowDeleteModal(true); }} className="flex items-center justify-between py-3 pt-4 cursor-pointer group">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center text-red-500">

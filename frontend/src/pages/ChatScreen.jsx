@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff } from 'lucide-react';
+import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff, Palette, Music } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import api from '../api';
@@ -20,6 +20,11 @@ export default function ChatScreen() {
   const isMuted = localStorage.getItem(`cv_mute_${receiverId}`) === 'true';
   const hasCustomPrivacy = localStorage.getItem(`cv_privacy_${receiverId}`) === 'true';
 
+  // Ultra Personalization States
+  const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
+  const [showThemeModal, setShowThemeModal] = useState(false);
+  const [showSoundModal, setShowSoundModal] = useState(false);
+
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [showMenu, setShowMenu] = useState(false);
@@ -30,16 +35,16 @@ export default function ChatScreen() {
   
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [activeReactId, setActiveReactId] = useState(null);
-  const emojis = ['❤️','😂','😘','😢','🙏','👍','😍'];
+  const emojis = ['❤️','😂','😲','😢','🙏','👍','🔥','✨'];
   
-  // NEW: Swipe-to-Reply States
+  // Swipe-to-Reply States
   const [swipingId, setSwipingId] = useState(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const swipeStartRef = useRef({ x: 0, y: 0 });
 
   const endOfMessagesRef = useRef(null);
   const pressTimer = useRef(null);
-  const longPressTriggered = useRef(false); // NEW: Long-Press Bug Fix Flag
+  const longPressTriggered = useRef(false);
   const [socket, setSocket] = useState(null);
 
   const formatTime = (dateString) => {
@@ -64,13 +69,21 @@ export default function ChatScreen() {
     newSocket.on('receive_message', (newMsg) => {
       if (newMsg.sender_id === receiverId) {
         setMessages((prev) => [...prev, newMsg]);
+        
+        // Custom Sound Logic
         if (!isMuted) {
           try {
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav');
+            const tone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
+            let audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav';
+            if (tone === 'minimal') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2354/2354-84.wav';
+            if (tone === 'retro') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-84.wav';
+            
+            const audio = new Audio(audioSrc);
             audio.volume = 0.4;
             audio.play();
           } catch(e){}
         }
+
         if (!hideReadReceipts) {
           newSocket.emit('mark_as_read', { messageId: newMsg.id, senderId: receiverId });
         }
@@ -83,6 +96,12 @@ export default function ChatScreen() {
 
     newSocket.on('message_updated', (updatedData) => {
       setMessages((prev) => prev.map(msg => msg.id === updatedData.id ? { ...msg, ...updatedData } : msg));
+    });
+
+    // Handle incoming theme changes
+    newSocket.on('theme_updated', ({ themeId }) => {
+      setChatTheme(themeId);
+      localStorage.setItem(`cv_theme_${receiverId}`, themeId);
     });
 
     let typingTimeout;
@@ -136,17 +155,16 @@ export default function ChatScreen() {
     );
   };
 
-  // UPDATED: Gesture Handlers for Long-Press & Swipe-to-Reply
   const handlePointerDown = (e, msg) => {
     if (msg.is_deleted_for_everyone) return;
     
-    longPressTriggered.current = false; // Reset flag on touch start
+    longPressTriggered.current = false;
     swipeStartRef.current = { x: e.clientX, y: e.clientY };
     setSwipingId(msg.id);
     setSwipeOffset(0);
 
     pressTimer.current = setTimeout(() => {
-      longPressTriggered.current = true; // Mark as long-pressed
+      longPressTriggered.current = true;
       if (selectedMessages.length === 0) {
         toggleSelection(msg);
         setSwipingId(null); 
@@ -214,13 +232,41 @@ export default function ChatScreen() {
     if (showMenu) setShowMenu(false);
   };
 
-  // Pre-calculations for Unread Divider
+  // Personalization Handlers
+  const applyTheme = (themeId) => {
+    setChatTheme(themeId);
+    localStorage.setItem(`cv_theme_${receiverId}`, themeId);
+    if (socket) socket.emit('change_chat_theme', { themeId, senderId: currentUser.unique_id, receiverId });
+    setShowThemeModal(false);
+  };
+
+  const testAndSetSound = (toneId) => {
+    let audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav';
+    if (toneId === 'minimal') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2354/2354-84.wav';
+    if (toneId === 'retro') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-84.wav';
+    
+    const audio = new Audio(audioSrc);
+    audio.volume = 0.5;
+    audio.play();
+
+    localStorage.setItem(`cv_sound_${receiverId}`, toneId);
+    setShowSoundModal(false);
+  };
+
+  // Dynamic Theme Styling function
+  const getThemeClasses = () => {
+    if (chatTheme === 'sunset') return 'bg-gradient-to-br from-rose-100 to-orange-100 dark:from-rose-950/50 dark:to-orange-950/50';
+    if (chatTheme === 'emerald') return 'bg-gradient-to-br from-emerald-50 to-teal-100 dark:from-emerald-950/50 dark:to-teal-900/50';
+    if (chatTheme === 'midnight') return 'bg-gradient-to-br from-indigo-100 to-purple-200 dark:from-indigo-950/50 dark:to-purple-950/50';
+    return 'bg-[#F0F2F5] dark:bg-gray-900'; // Default
+  };
+
   const visibleMessages = messages.filter(m => !m.is_deleted_for_me);
   const firstUnreadIndex = visibleMessages.findIndex(m => m.sender_id === receiverId && m.status !== 'read');
   const unreadCount = visibleMessages.filter(m => m.sender_id === receiverId && m.status !== 'read').length;
 
   return (
-    <div className="h-full w-full bg-[#F0F2F5] dark:bg-gray-900 flex flex-col relative transition-colors" onClick={handleScreenClick}>
+    <div className={`h-full w-full flex flex-col relative transition-colors ${getThemeClasses()}`} onClick={handleScreenClick}>
       
       {/* Top Action Bar for Selected Messages */}
       {selectedMessages.length > 0 ? (
@@ -261,6 +307,14 @@ export default function ChatScreen() {
             <button onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }} className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"><MoreVertical className="w-5 h-5" /></button>
             {showMenu && (
               <div className="absolute right-0 top-12 w-48 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[100]">
+                {/* Custom Personalization Options */}
+                <button onClick={() => { setShowMenu(false); setShowThemeModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
+                  <Palette className="w-4 h-4 text-chatverse" /> Chat Theme
+                </button>
+                <button onClick={() => { setShowMenu(false); setShowSoundModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
+                  <Music className="w-4 h-4 text-indigo-400" /> Chat Tone
+                </button>
+                
                 <button onClick={() => { setMessages([]); setShowMenu(false); api.delete(`/chats/${receiverId}`); }} className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 font-semibold transition-colors">Clear Chat Now</button>
               </div>
             )}
@@ -278,44 +332,42 @@ export default function ChatScreen() {
           return (
             <div key={msg.id || idx} className={`w-full flex flex-col ${activeReactId === msg.id ? 'relative z-40' : 'relative z-0'}`}>
               
-              {/* Unread Messages WhatsApp-style Divider */}
+              {/* Unread Divider */}
               {idx === firstUnreadIndex && unreadCount > 0 && (
                 <div className="w-full flex justify-center my-4 relative z-0">
                   <div className="bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700 text-chatverse dark:text-indigo-400 text-[11px] font-black px-4 py-1.5 rounded-full z-10">
                     {unreadCount} UNREAD MESSAGE{unreadCount > 1 ? 'S' : ''}
                   </div>
-                  <div className="absolute top-1/2 left-0 w-full h-[1px] bg-gray-200 dark:bg-gray-700/50 z-0"></div>
+                  <div className="absolute top-1/2 left-0 w-full h-[1px] bg-gray-300 dark:bg-gray-700/50 z-0"></div>
                 </div>
               )}
 
-              {/* Dynamic margin bottom */}
               <div className={`flex w-full ${hasReaction ? 'mb-[22px]' : 'mb-1.5'} group ${isMe ? 'justify-end' : 'justify-start'}`}>
                 
-                {/* Quick Actions (For Me) -> Sirf Smile Button rakha hai */}
+                {/* Quick Action Smile */}
                 {isMe && !msg.is_deleted_for_everyone && (
                   <div className="flex items-center gap-1 pr-2 opacity-0 group-hover:opacity-100 transition-opacity self-center">
-                    <button onClick={(e) => { e.stopPropagation(); setActiveReactId(msg.id); }} className="p-1.5 text-gray-400 hover:text-chatverse rounded-full"><Smile className="w-[18px] h-[18px]"/></button>
+                    <button onClick={(e) => { e.stopPropagation(); setActiveReactId(msg.id); }} className="p-1.5 text-gray-500 hover:text-chatverse bg-white/50 dark:bg-black/20 rounded-full backdrop-blur-sm"><Smile className="w-[18px] h-[18px]"/></button>
                   </div>
                 )}
 
-                {/* Main Wrapper Box to handle the Swipe Layout perfectly */}
                 <div className="relative max-w-[80%] flex flex-col">
                   
-                  {/* The Reveal Swipe Reply Icon */}
+                  {/* Swipe Reply Icon */}
                   {swipingId === msg.id && (
                     <div className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
                          style={{ left: '-6px', opacity: Math.min(swipeOffset / 40, 1), transform: `scale(${Math.min(swipeOffset / 40, 1)})` }}>
-                      <Reply className="w-[14px] h-[14px] text-gray-600 dark:text-gray-300" />
+                      <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
                     </div>
                   )}
 
-                  {/* The Moving Bubble Layer */}
+                  {/* Main Bubble Area */}
                   <div className="relative flex flex-col z-20"
                        style={{ transform: swipingId === msg.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
                     
-                    {/* Main Message Bubble */}
                     <div 
-                      onClick={(e) => { e.stopPropagation(); 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
                         if (longPressTriggered.current) { longPressTriggered.current = false; return; }
                         if (selectedMessages.length > 0) toggleSelection(msg); 
                       }}
@@ -323,32 +375,29 @@ export default function ChatScreen() {
                       onPointerMove={(e) => { e.stopPropagation(); handlePointerMove(e, msg); }}
                       onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(e, msg); }}
                       onPointerLeave={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
-                      className={`relative px-2.5 pt-1.5 pb-1 shadow-sm cursor-pointer transition-all select-none ${
+                      className={`relative px-2.5 pt-1.5 pb-1 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
                         isSelected ? 'bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 rounded-2xl' :
                         msg.is_deleted_for_everyone ? 'bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 rounded-[18px]' 
                         : isMe ? 'bg-chatverse text-white rounded-[18px] rounded-tr-[4px]' 
-                        : 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-[18px] rounded-tl-[4px]'
+                        : 'bg-white dark:bg-gray-800 border border-gray-100/50 dark:border-gray-700/50 text-gray-800 dark:text-gray-100 rounded-[18px] rounded-tl-[4px]'
                       }`}
                     >
                       
-                      {/* Replied Content Banner */}
                       {msg.reply_content && !msg.is_deleted_for_everyone && (
                         <div className={`mb-1 px-2.5 py-1.5 rounded-lg text-[13px] line-clamp-1 border-l-4 ${isMe ? 'bg-indigo-700/30 border-white/70 text-indigo-50' : 'bg-gray-100 dark:bg-gray-700 border-chatverse text-gray-600 dark:text-gray-300'}`}>
                           {msg.reply_content}
                         </div>
                       )}
                       
-                      {/* 100% PERFECT WHATSAPP-STYLE SAFE CONTAINER */}
+                      {/* Invisible Spacer Trick for WhatsApp Time alignment */}
                       <div className="relative text-[15px] leading-[1.4] break-words">
                         <span>{msg.content}</span>
-                        
-                        {/* INVISIBLE SPACER: Time ko jagah dene ke liye ye space line break force karega */}
                         {!msg.is_deleted_for_everyone && (
                           <span className={`inline-block h-[12px] ${isMe ? 'w-[75px]' : 'w-[52px]'}`}></span>
                         )}
                       </div>
 
-                      {/* Timestamp safely locked at the absolute bottom-right corner inside the bubble */}
+                      {/* Floating Timestamp bottom right */}
                       {!msg.is_deleted_for_everyone && (
                         <div className={`absolute bottom-1 right-2 flex items-center gap-[3px] text-[10px] font-medium select-none ${isMe ? 'text-indigo-100/90' : 'text-gray-400 dark:text-gray-500'}`}>
                           {msg.is_starred && <Star className="w-[10px] h-[10px] fill-current mr-0.5" />}
@@ -365,14 +414,14 @@ export default function ChatScreen() {
                       )}
                     </div>
 
-                    {/* Reaction Badge completely outside the bubble, perfectly aligned */}
+                    {/* Reaction Badge */}
                     {msg.reaction && !msg.is_deleted_for_everyone && (
                       <div className={`absolute -bottom-3.5 ${isMe ? 'right-4' : 'left-4'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-30 select-none flex items-center justify-center`}>
                         {msg.reaction}
                       </div>
                     )}
 
-                    {/* Inline Emoji Picker specifically for this message */}
+                    {/* Emoji Picker */}
                     {activeReactId === msg.id && (
                       <div onClick={(e) => e.stopPropagation()} className={`absolute z-50 bottom-full mb-1 ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 shadow-xl border border-gray-100 dark:border-gray-700 p-2 flex gap-2 rounded-[20px] animate-slide-up`}>
                         {emojis.map(emoji => (
@@ -386,10 +435,9 @@ export default function ChatScreen() {
                   </div>
                 </div>
 
-                {/* Quick Actions (For Friend) -> Sirf Smile Button rakha hai */}
                 {!isMe && !msg.is_deleted_for_everyone && (
                   <div className="flex items-center gap-1 pl-2 opacity-0 group-hover:opacity-100 transition-opacity self-center">
-                    <button onClick={(e) => { e.stopPropagation(); setActiveReactId(msg.id); }} className="p-1.5 text-gray-400 hover:text-chatverse rounded-full"><Smile className="w-[18px] h-[18px]"/></button>
+                    <button onClick={(e) => { e.stopPropagation(); setActiveReactId(msg.id); }} className="p-1.5 text-gray-500 hover:text-chatverse bg-white/50 dark:bg-black/20 rounded-full backdrop-blur-sm"><Smile className="w-[18px] h-[18px]"/></button>
                   </div>
                 )}
 
@@ -413,7 +461,6 @@ export default function ChatScreen() {
       {/* Input Field & Reply Banner Control */}
       <div className="bg-white dark:bg-gray-800 flex flex-col border-t border-gray-100/60 dark:border-gray-700 shadow-md z-10 relative">
         
-        {/* Reply Context Banner */}
         {replyingTo && (
           <div className="bg-gray-50 dark:bg-gray-700/50 px-4 py-2 border-l-4 border-chatverse flex justify-between items-center text-sm shadow-sm relative z-0">
              <div className="flex flex-col">
@@ -424,7 +471,6 @@ export default function ChatScreen() {
           </div>
         )}
 
-        {/* Global Emoji Picker (For input bar) */}
         {showEmojiPicker && (
           <div className="absolute bottom-[70px] left-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 shadow-2xl rounded-[20px] p-4 grid grid-cols-4 gap-3 z-50 w-64 animate-slide-up">
             {emojis.map(e => (
@@ -453,6 +499,70 @@ export default function ChatScreen() {
           </button>
         </div>
       </div>
+
+      {/* --- Personalization Modals --- */}
+      
+      {/* 1. Theme Modal */}
+      {showThemeModal && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowThemeModal(false)}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+            <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <Palette className="w-5 h-5 text-chatverse" /> Select Theme
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { id: 'default', name: 'Classic Blue', style: 'bg-gray-100 dark:bg-gray-700' },
+                { id: 'sunset', name: 'Sunset Glow', style: 'bg-gradient-to-br from-rose-200 to-orange-200' },
+                { id: 'emerald', name: 'Emerald', style: 'bg-gradient-to-br from-emerald-200 to-teal-200' },
+                { id: 'midnight', name: 'Midnight', style: 'bg-gradient-to-br from-indigo-300 to-purple-300' }
+              ].map(theme => (
+                <button 
+                  key={theme.id} 
+                  onClick={() => applyTheme(theme.id)}
+                  className={`p-4 rounded-2xl flex flex-col items-center justify-center gap-2 transition-transform hover:scale-105 active:scale-95 ${chatTheme === theme.id ? 'ring-4 ring-chatverse ring-offset-2 dark:ring-offset-gray-800' : ''}`}
+                >
+                  <div className={`w-12 h-12 rounded-full ${theme.style} shadow-inner`}></div>
+                  <span className="text-[13px] font-bold text-gray-700 dark:text-gray-200">{theme.name}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowThemeModal(false)} className="mt-5 w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 rounded-xl">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Sound Modal */}
+      {showSoundModal && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowSoundModal(false)}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+            <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <Music className="w-5 h-5 text-indigo-400" /> Notification Tone
+            </h3>
+            <div className="flex flex-col gap-2">
+              {[
+                { id: 'default', name: 'Default Pop' },
+                { id: 'minimal', name: 'Minimal Chime' },
+                { id: 'retro', name: 'Retro Ping' }
+              ].map(tone => {
+                const currentTone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
+                return (
+                  <button 
+                    key={tone.id} 
+                    onClick={() => testAndSetSound(tone.id)}
+                    className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${currentTone === tone.id ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                  >
+                    <span className="font-bold text-[15px] text-gray-800 dark:text-gray-100">{tone.name}</span>
+                    {currentTone === tone.id && <Check className="w-5 h-5 text-chatverse" />}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-center text-[12px] text-gray-400 mt-4 px-2">Tap a tone to hear a preview.</p>
+            <button onClick={() => setShowSoundModal(false)} className="mt-3 w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 rounded-xl">Done</button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
