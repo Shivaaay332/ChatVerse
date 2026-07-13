@@ -108,7 +108,7 @@ export default function ChatList() {
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
       
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-8 pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Messages</h1>
           <button onClick={handleOpenFriendsModal} className="text-chatverse dark:text-indigo-400 bg-indigo-50 dark:bg-gray-700 p-2.5 rounded-full hover:bg-chatverse hover:text-white dark:hover:bg-indigo-500 transition-all shadow-sm">
@@ -128,7 +128,18 @@ export default function ChatList() {
 
       <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar pb-24 pt-2">
         {loading ? (
-           <div className="flex justify-center py-10"><Loader className="w-6 h-6 text-chatverse animate-spin" /></div>
+           /* NAYA SKELETON LOADER FOR CHAT LIST */
+           <div className="flex flex-col gap-5 px-5 py-4 mt-2">
+             {[1, 2, 3, 4, 5, 6].map((i) => (
+               <div key={i} className="flex items-center gap-4 animate-pulse">
+                 <div className="w-13 h-13 bg-gray-200 dark:bg-gray-700 rounded-full shrink-0"></div>
+                 <div className="flex-1 flex flex-col gap-2.5">
+                   <div className="w-32 h-3 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+                   <div className="w-48 h-2 bg-gray-100 dark:bg-gray-600 rounded-full"></div>
+                 </div>
+               </div>
+             ))}
+           </div>
         ) : searchQuery.length > 0 ? (
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 overflow-hidden mt-2">
              <div className="px-5 py-3 text-[11px] font-black text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Search Results</div>
@@ -166,7 +177,11 @@ export default function ChatList() {
               }
 
               return (
-                <div key={user.unique_id} onClick={() => navigate(`/chat/${user.unique_id}`, { state: { name: user.username, id: user.unique_id } })} className={`flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''}`}>
+                <div 
+                  key={user.unique_id} 
+                  onClick={() => navigate(`/chat/${user.unique_id}`, { state: { name: user.username, id: user.unique_id } })} 
+                  className={`flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-all active:scale-[0.98] active:opacity-70 border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''}`}
+                >
                   
                   <div className="w-13 h-13 shrink-0 relative">
                     <div className="w-12 h-12 bg-gradient-to-tr from-chatverse to-purple-500 p-[2px] rounded-full shadow-sm">

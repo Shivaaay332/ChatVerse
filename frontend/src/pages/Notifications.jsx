@@ -101,7 +101,7 @@ export default function Notifications() {
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col relative transition-colors">
       
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 flex items-center gap-4 z-20 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm">
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <button onClick={() => navigate(-1)} className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
           <ArrowLeft className="w-[22px] h-[22px]" />
         </button>
@@ -110,7 +110,18 @@ export default function Notifications() {
 
       <div className="flex-1 overflow-y-auto no-scrollbar pb-24 pt-2">
         {loading ? (
-          <div className="flex justify-center mt-12"><Loader className="w-7 h-7 text-chatverse animate-spin" /></div>
+          /* NAYA SKELETON LOADER FOR NOTIFICATIONS */
+          <div className="flex flex-col gap-5 px-5 pt-6">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="flex items-start gap-4 animate-pulse mb-2">
+                <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-full shrink-0"></div>
+                <div className="flex-1 flex flex-col gap-2.5 mt-1">
+                  <div className="w-3/4 h-3 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+                  <div className="w-1/2 h-2 bg-gray-100 dark:bg-gray-600 rounded-full"></div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center pt-24 text-gray-400">
             <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4 shadow-inner">

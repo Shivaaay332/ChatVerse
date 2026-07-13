@@ -16,9 +16,34 @@ export default function ChatScreen() {
   const hideReadReceipts = localStorage.getItem('chatverse_hide_readreceipts') === 'true';
   const hideLastSeen = localStorage.getItem('chatverse_hide_lastseen') === 'true';
 
-  // Privacy Settings
   const isMuted = localStorage.getItem(`cv_mute_${receiverId}`) === 'true';
   const hasCustomPrivacy = localStorage.getItem(`cv_privacy_${receiverId}`) === 'true';
+
+  // ==========================================
+  // NAYA CODE: KEYBOARD GLITCH FIX 
+  // ==========================================
+  const [viewportHeight, setViewportHeight] = useState('100dvh');
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        // Keyboard open/close hone par exact screen height set karega
+        setViewportHeight(`${window.visualViewport.height}px`);
+        // Keyboard open hone par chat ko automatically neeche scroll karega
+        setTimeout(() => {
+          endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      }
+    };
+
+    window.visualViewport?.addEventListener('resize', handleResize);
+    handleResize(); // Component load hote hi initial height set karega
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleResize);
+    };
+  }, []);
+  // ==========================================
 
   // Ultra Personalization States
   const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
@@ -266,7 +291,11 @@ export default function ChatScreen() {
   const unreadCount = visibleMessages.filter(m => m.sender_id === receiverId && m.status !== 'read').length;
 
   return (
-    <div className={`h-full w-full flex flex-col relative transition-colors ${getThemeClasses()}`} onClick={handleScreenClick}>
+    <div 
+      className={`w-full flex flex-col relative transition-colors overflow-hidden ${getThemeClasses()}`} 
+      style={{ height: viewportHeight }}
+      onClick={handleScreenClick}
+    >
       
       {/* Top Action Bar for Selected Messages */}
       {selectedMessages.length > 0 ? (
@@ -494,7 +523,14 @@ export default function ChatScreen() {
             className="flex-1 max-h-28 bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400" 
             rows="1" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
           />
-          <button onClick={handleSend} disabled={!message.trim()} className={`p-3 rounded-full transition-all ${message.trim() ? 'bg-chatverse text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}>
+          <button 
+            onClick={() => {
+              if (window.navigator?.vibrate) window.navigator.vibrate(15); // Haptic Feedback
+              handleSend();
+            }} 
+            disabled={!message.trim()} 
+            className={`p-3 rounded-full transition-all active:scale-90 ${message.trim() ? 'bg-chatverse text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}
+          >
             <Send className="w-5 h-5 ml-0.5" />
           </button>
         </div>

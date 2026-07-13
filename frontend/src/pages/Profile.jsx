@@ -162,7 +162,7 @@ export default function Profile() {
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col relative transition-colors overflow-hidden">
       
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 flex items-center justify-between z-20 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm">
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <button onClick={() => navigate(-1)} className="p-2 bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
           <ArrowLeft className="w-5 h-5" />
         </button>

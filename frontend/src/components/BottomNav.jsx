@@ -36,7 +36,7 @@ export default function BottomNav() {
   ];
 
   return (
-    <div className="absolute bottom-0 w-full glass-nav flex justify-between items-center px-6 py-3 pb-5 z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]">
+    <div className="absolute bottom-0 w-full glass-nav flex justify-between items-center px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+16px)] z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]">
       {navItems.map((item) => {
         const isActive = location.pathname.includes(item.path);
         const Icon = item.icon;

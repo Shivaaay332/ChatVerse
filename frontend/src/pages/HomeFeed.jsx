@@ -277,7 +277,13 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
       {/* INTERACTION BAR */}
       <div className="flex items-center gap-6 mt-4 pt-4 border-t border-gray-100 dark:border-gray-700/60">
         <div className="flex items-center gap-2">
-          <button onClick={handleLikeToggle} className={`transition-all ${liked ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-400'}`}>
+          <button 
+            onClick={() => {
+              if (window.navigator?.vibrate) window.navigator.vibrate(10); // Haptic Feedback
+              handleLikeToggle();
+            }} 
+            className={`transition-all active:scale-75 ${liked ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-400'}`}
+          >
             <Heart className={`w-6 h-6 transition-transform ${liked ? 'fill-red-500 scale-[1.15]' : ''}`} /> 
           </button>
           <span onClick={fetchPostLikes} className={`text-[14px] font-bold ${likeCount > 0 ? 'cursor-pointer hover:underline text-gray-700 dark:text-gray-300' : 'text-gray-400'}`}>
@@ -393,7 +399,7 @@ export default function HomeFeed() {
 
   return (
     <div className="h-full w-full bg-[#F4F6F8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 flex flex-col gap-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm">
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Feed</h1>
         <div className="flex items-center gap-3">
           <div className="w-[42px] h-[42px] bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0 uppercase shadow-md">
