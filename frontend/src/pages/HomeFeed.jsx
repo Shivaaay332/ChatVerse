@@ -160,7 +160,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
             </div>
           ) : (
             <div className="bg-white dark:bg-gray-700 px-3.5 py-2.5 rounded-[16px] rounded-tl-[4px] shadow-sm border border-gray-50 dark:border-gray-600 w-fit max-w-full break-words">
-              <span onClick={() => handleProfileClick(c.unique_id, c.username)} className="font-bold text-[13px] text-gray-900 dark:text-gray-100 cursor-pointer hover:underline pr-2">{c.username}</span>
+              <span onClick={() => handleProfileClick(c.unique_id, c.username)} className="font-bold text-[15px] text-gray-900 dark:text-gray-100 cursor-pointer hover:underline pr-2">{c.username}</span>
               <span className="text-[14px] text-gray-800 dark:text-gray-200 leading-snug">{c.comment}</span>
             </div>
           )}
@@ -273,7 +273,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
         </div>
       ) : (
         <div className="py-1 px-1">
-          <p className="text-gray-800 dark:text-gray-200 text-[15px] leading-[1.6] whitespace-pre-wrap font-medium">{post.content}</p>
+          <p className="text-gray-800 dark:text-gray-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">{post.content}</p>
         </div>
       )}
       
@@ -309,7 +309,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
                 <div key={u.unique_id} onClick={() => { setShowLikesModal(false); handleProfileClick(u.unique_id, u.username); }} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-2xl cursor-pointer transition-colors">
                   <div className="w-11 h-11 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">{u.username.charAt(0)}</div>
                   <div className="flex-1">
-                    <p className="font-bold text-gray-900 dark:text-white text-[14.5px]">{u.username}</p>
+                    <p className="font-bold text-gray-900 dark:text-white text-[15px]">{u.username}</p>
                     <p className="text-[12.5px] text-gray-500 font-medium">@{u.unique_id}</p>
                   </div>
                 </div>
@@ -393,8 +393,8 @@ export default function HomeFeed() {
   const removeLocalPost = (id) => { setPosts(posts.filter(p => p.id !== id)); };
 
   return (
-    <div className="h-full w-full bg-[#F4F6F8] dark:bg-gray-900 flex flex-col relative transition-colors">
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 flex flex-col gap-4 z-20 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm">
+    <div className="h-full w-full bg-[#F4F6F8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 flex flex-col gap-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm">
         <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Feed</h1>
         <div className="flex items-center gap-3">
           <div className="w-[42px] h-[42px] bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0 uppercase shadow-md">
@@ -413,7 +413,7 @@ export default function HomeFeed() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar pb-24 pt-5">
+      <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar pb-24 pt-5">
         {loading ? ( 
           <div className="flex flex-col gap-5 px-4">
             {[1, 2, 3].map((i) => (

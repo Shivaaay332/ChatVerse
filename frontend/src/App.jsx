@@ -52,7 +52,7 @@ function App() {
   };
 
   if (loading) {
-    return <div className="h-screen w-screen flex items-center justify-center bg-chatverse text-white font-bold text-xl tracking-widest animate-pulse">CHATVERSE</div>;
+    return <div className="h-[100dvh] w-screen flex items-center justify-center bg-chatverse text-white font-bold text-xl tracking-widest animate-pulse">CHATVERSE</div>;
   }
 
   if (isAuthenticated && isAppLocked) {
@@ -64,8 +64,8 @@ function App() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#e5e5e5] dark:bg-black flex justify-center sm:py-6 transition-colors duration-300">
-      <div className="h-full w-full sm:max-w-[400px] sm:h-[90vh] sm:rounded-[40px] sm:shadow-2xl sm:border-[8px] sm:border-gray-900 overflow-hidden relative bg-white dark:bg-gray-900 flex flex-col transition-colors duration-300">
+    <div className="h-[100dvh] w-screen overflow-hidden overscroll-none bg-[#e5e5e5] dark:bg-black flex justify-center sm:py-6 transition-colors duration-300">
+      <div className="flex-1 w-full h-full sm:max-w-[400px] sm:h-[90vh] sm:rounded-[40px] sm:shadow-2xl sm:border-[8px] sm:border-gray-900 overflow-hidden flex flex-col relative bg-white dark:bg-gray-900 transition-colors duration-300">
         <Routes>
           <Route path="/" element={<Navigate to="/home" />} />
           <Route path="/home" element={<HomeFeed />} />
