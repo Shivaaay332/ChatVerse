@@ -52,18 +52,87 @@ export default function ChatScreen() {
   const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   useEffect(() => {
-    const handleResize = () => {
-      if (window.visualViewport) {
-        setViewportHeight(`${window.visualViewport.height}px`);
-        setTimeout(() => {
-          endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
+    const newSocket = io(SOCKET_URL);
+    setSocket(newSocket);
+    newSocket.emit('join', currentUser.unique_id);
+
+    // ==========================================
+    // NAYA CODE: AGGRESSIVE BLUE TICK SYNC
+    // ==========================================
+    api.get(`/messages/${receiverId}`).then(res => {
+      const fetchedMessages = res.data;
+      setMessages(fetchedMessages);
+
+      // Jaise hi chat load ho, check karo dost ke kitne messages unread hain
+      if (!hideReadReceipts) {
+        const unreadMsgs = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
+        
+        if (unreadMsgs.length > 0) {
+          // 1. Optimistic Local Update (Apni screen par instantly ticks update karo)
+          setMessages(prev => prev.map(m => 
+            (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
+          ));
+
+          // 2. Aggressive Socket Emit (Dost ko turant Blue ticks bhejo bina delay ke)
+          unreadMsgs.forEach(msg => {
+            newSocket.emit('mark_as_read', { messageId: msg.id, senderId: receiverId });
+          });
+        }
       }
-    };
-    window.visualViewport?.addEventListener('resize', handleResize);
-    handleResize(); // Initial setup
-    return () => window.visualViewport?.removeEventListener('resize', handleResize);
-  }, []);
+    }).catch(err => console.log(err));
+    // ==========================================
+
+
+    newSocket.on('receive_message', (newMsg) => {
+      if (newMsg.sender_id === receiverId) {
+        setMessages((prev) => [...prev, newMsg]);
+        
+        // Custom Sound Logic
+        if (!isMuted) {
+          try {
+            const tone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
+            let audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav';
+            if (tone === 'minimal') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2354/2354-84.wav';
+            if (tone === 'retro') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-84.wav';
+            
+            const audio = new Audio(audioSrc);
+            audio.volume = 0.4;
+            audio.play();
+          } catch(e){}
+        }
+
+        // Live chat ke dauran turant blue tick bhejna
+        if (!hideReadReceipts) {
+          newSocket.emit('mark_as_read', { messageId: newMsg.id, senderId: receiverId });
+        }
+      }
+    });
+
+    newSocket.on('message_status', ({ tempId, status, realId }) => {
+      setMessages((prev) => prev.map(msg => msg.tempId === tempId ? { ...msg, status, id: realId } : msg));
+    });
+
+    // Ye listener Sender ko aggressively update karega jaise hi Receiver ki taraf se emit hoga
+    newSocket.on('message_updated', (updatedData) => {
+      setMessages((prev) => prev.map(msg => msg.id === updatedData.id ? { ...msg, ...updatedData } : msg));
+    });
+
+    newSocket.on('theme_updated', ({ themeId }) => {
+      setChatTheme(themeId);
+      localStorage.setItem(`cv_theme_${receiverId}`, themeId);
+    });
+
+    let typingTimeout;
+    newSocket.on('typing', (senderId) => {
+      if (senderId === receiverId) {
+        setIsTyping(true);
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => setIsTyping(false), 2000);
+      }
+    });
+
+    return () => newSocket.disconnect();
+  }, [receiverId, currentUser.unique_id, hideReadReceipts, isMuted]);
 
   const formatTime = (dateString) => {
     if (!dateString) return 'Now';
