@@ -20,7 +20,8 @@ const timeAgo = (dateString) => {
   return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 };
 
-const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
+// UNIVERSAL POST COMPONENT
+export const PostItem = ({ post, onPostUpdate, onPostDelete, isModal = false, onClose }) => {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { unique_id: '' };
   const isMyPost = post.unique_id === currentUser.unique_id;
@@ -47,8 +48,14 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
 
+  // FIX: Smart Navigation (Khud ki profile par click kiya toh seedha "My Profile" open hogi)
   const handleProfileClick = (id, username) => {
-    navigate(`/user/${id}`, { state: { user: { unique_id: id, username: username } } });
+    if (onClose) onClose(); // Close modal if navigating
+    if (id === currentUser.unique_id) {
+      navigate('/profile');
+    } else {
+      navigate(`/user/${id}`, { state: { user: { unique_id: id, username: username } } });
+    }
   };
 
   const handleLikeToggle = async () => {
@@ -189,7 +196,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
     if (!editContent.trim()) return;
     try {
       await api.put(`/posts/${post.id}`, { content: editContent });
-      onPostUpdate(post.id, editContent); 
+      if (onPostUpdate) onPostUpdate(post.id, editContent); 
       setIsEditing(false);
     } catch (err) { alert("Error saving edit"); }
   };
@@ -205,16 +212,16 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
       try {
         await api.delete(`/posts/${post.id}`);
         setShowMenu(false);
-        onPostDelete(post.id); 
+        if (onPostDelete) onPostDelete(post.id); 
       } catch (err) { alert("Error deleting"); }
     }
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 mb-5 mx-4 p-5 rounded-[24px] shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] dark:shadow-none border border-gray-50 dark:border-gray-700 transition-all">
+    <div className={`bg-white dark:bg-gray-800 transition-all ${isModal ? 'w-full rounded-[24px] shadow-2xl border border-gray-100 dark:border-gray-700 relative' : 'mb-5 mx-4 p-5 rounded-[24px] shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] dark:shadow-none border border-gray-50 dark:border-gray-700'}`}>
       
       {/* HEADER */}
-      <div className="flex justify-between items-center mb-4">
+      <div className={`flex justify-between items-center ${isModal ? 'px-5 py-4 border-b border-gray-50 dark:border-gray-700/60' : 'mb-4'}`}>
         <div onClick={() => handleProfileClick(post.unique_id, post.username)} className="flex items-center gap-3.5 cursor-pointer hover:opacity-80 transition-opacity">
           <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full p-[2px] shadow-sm">
             <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-gray-900 dark:text-white font-bold text-[15px] uppercase">
@@ -231,11 +238,17 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
         </div>
         
         {/* MENU */}
-        <div className="relative">
+        <div className="relative flex items-center gap-1">
           <button onClick={() => setShowMenu(!showMenu)} className="text-gray-400 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
             <MoreVertical className="w-5 h-5" />
           </button>
           
+          {onClose && (
+            <button onClick={onClose} className="p-1.5 ml-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full text-gray-600 dark:text-gray-300 transition-colors">
+              <X className="w-5 h-5"/>
+            </button>
+          )}
+
           {showMenu && (
             <div className="absolute right-0 top-10 w-44 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-20 animate-slide-up">
               <button onClick={handleCopy} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-700 dark:text-gray-200 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 font-bold transition-colors">
@@ -257,29 +270,29 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
       </div>
       
       {/* POST CONTENT */}
-      {isEditing ? (
-        <div className="py-2">
-           <textarea
-             value={editContent} onChange={(e) => setEditContent(e.target.value)}
-             className="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-chatverse transition-all resize-none text-[15px]" rows="3"
-           />
-           <div className="flex justify-end gap-2 mt-2">
-             <button onClick={() => setIsEditing(false)} className="px-4 py-1.5 text-[13px] font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">Cancel</button>
-             <button onClick={handleEditSave} className="px-4 py-1.5 text-[13px] font-bold bg-chatverse text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">Save</button>
-           </div>
-        </div>
-      ) : (
-        <div className="py-1 px-1">
+      <div className={isModal ? 'px-5 py-4' : 'py-1 px-1'}>
+        {isEditing ? (
+          <div>
+             <textarea
+               value={editContent} onChange={(e) => setEditContent(e.target.value)}
+               className="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-chatverse transition-all resize-none text-[15px]" rows="3"
+             />
+             <div className="flex justify-end gap-2 mt-2">
+               <button onClick={() => setIsEditing(false)} className="px-4 py-1.5 text-[13px] font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">Cancel</button>
+               <button onClick={handleEditSave} className="px-4 py-1.5 text-[13px] font-bold bg-chatverse text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">Save</button>
+             </div>
+          </div>
+        ) : (
           <p className="text-gray-800 dark:text-gray-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">{post.content}</p>
-        </div>
-      )}
+        )}
+      </div>
       
       {/* INTERACTION BAR */}
-      <div className="flex items-center gap-6 mt-4 pt-4 border-t border-gray-100 dark:border-gray-700/60">
+      <div className={`flex items-center gap-6 ${isModal ? 'px-5 py-4 border-t border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/50' : 'mt-4 pt-4 border-t border-gray-100 dark:border-gray-700/60'}`}>
         <div className="flex items-center gap-2">
           <button 
             onClick={() => {
-              if (window.navigator?.vibrate) window.navigator.vibrate(10); // Haptic Feedback
+              if (window.navigator?.vibrate) window.navigator.vibrate(10); 
               handleLikeToggle();
             }} 
             className={`transition-all active:scale-75 ${liked ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-400'}`}
@@ -299,7 +312,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
 
       {/* LIKES MODAL */}
       {showLikesModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={() => setShowLikesModal(false)}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={() => setShowLikesModal(false)}>
           <div className="bg-white dark:bg-gray-800 w-full max-w-[340px] rounded-[24px] shadow-2xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
               <h3 className="font-black text-lg text-gray-900 dark:text-white">Likes</h3>
@@ -309,7 +322,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
               {likesLoading ? <div className="py-8 flex justify-center"><div className="w-6 h-6 border-2 border-chatverse border-t-transparent rounded-full animate-spin"></div></div>
               : likedUsers.length === 0 ? <div className="py-8 text-center text-[14px] font-medium text-gray-500">No likes yet.</div> 
               : likedUsers.map(u => (
-                <div key={u.unique_id} onClick={() => { setShowLikesModal(false); handleProfileClick(u.unique_id, u.username); }} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-2xl cursor-pointer transition-colors">
+                <div key={u.unique_id} onClick={() => handleProfileClick(u.unique_id, u.username)} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-2xl cursor-pointer transition-colors">
                   <div className="w-11 h-11 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">{u.username.charAt(0)}</div>
                   <div className="flex-1">
                     <p className="font-bold text-gray-900 dark:text-white text-[15px] flex items-center gap-1">
@@ -327,7 +340,7 @@ const PostItem = ({ post, onPostUpdate, onPostDelete }) => {
 
       {/* COMMENTS AREA */}
       {showComments && (
-        <div className="mt-4 animate-slide-down bg-gray-50/50 dark:bg-gray-800/50 p-4 rounded-[20px] border border-gray-100 dark:border-gray-700">
+        <div className={`animate-slide-down bg-gray-50/50 dark:bg-gray-800/50 ${isModal ? 'p-4 border-t border-gray-100 dark:border-gray-700/60' : 'mt-4 p-4 rounded-[20px] border border-gray-100 dark:border-gray-700'}`}>
           {loadingComments ? (
             <div className="py-4 flex justify-center"><div className="w-5 h-5 border-2 border-chatverse border-t-transparent rounded-full animate-spin"></div></div>
           ) : comments.length === 0 ? (

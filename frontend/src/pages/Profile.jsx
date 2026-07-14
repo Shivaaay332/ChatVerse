@@ -1,122 +1,9 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Edit3, Grid, Loader, Check, X, Trash2, Heart, MessageCircle, MoreVertical, Copy, ChevronRight, BadgeCheck } from 'lucide-react';
+import { ArrowLeft, Edit3, Grid, Loader, Check, X, ChevronRight, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav'; 
 import api from '../api'; 
-
-// Time formatter
-const timeAgo = (dateString) => {
-  if (!dateString) return 'Just now';
-  const date = new Date(dateString.endsWith('Z') ? dateString : `${dateString}Z`);
-  const now = new Date();
-  const seconds = Math.round((now - date) / 1000);
-  if (seconds < 60) return 'Just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-};
-
-// Profile Post Component (Used inside the Modal)
-const ProfilePostItem = ({ post, onPostUpdate, onPostDelete, onClose }) => {
-  const [showMenu, setShowMenu] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editContent, setEditContent] = useState(post.content);
-
-  const handleEditSave = async () => {
-    if (!editContent.trim()) return;
-    try {
-      await api.put(`/posts/${post.id}`, { content: editContent });
-      onPostUpdate(post.id, editContent);
-      setIsEditing(false);
-    } catch (err) { alert("Error saving edit"); }
-  };
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(post.content);
-    setShowMenu(false);
-    alert("Text copied!");
-  };
-
-  const handleDeletePost = async () => {
-    if(window.confirm("Permanently delete this post?")) {
-      try {
-        await api.delete(`/posts/${post.id}`);
-        setShowMenu(false);
-        onPostDelete(post.id); 
-      } catch (err) { alert("Error deleting"); }
-    }
-  };
-
-  return (
-    <div className="bg-white dark:bg-gray-800 w-full rounded-[24px] shadow-2xl border border-gray-100 dark:border-gray-700 transition-all overflow-hidden relative">
-      <div className="flex justify-between items-center px-5 py-4 border-b border-gray-50 dark:border-gray-700/60">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm uppercase">
-            {post.username?.charAt(0) || 'U'}
-          </div>
-          <div className="flex flex-col">
-            <h3 className="font-bold text-gray-900 dark:text-white text-[15px]">{post.username}</h3>
-            <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500">{timeAgo(post.created_at)}</p>
-          </div>
-        </div>
-        
-        <div className="relative flex items-center gap-2">
-          <button onClick={() => setShowMenu(!showMenu)} className="text-gray-400 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-            <MoreVertical className="w-5 h-5" />
-          </button>
-          
-          {showMenu && (
-            <div className="absolute right-0 top-10 w-44 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-20 animate-slide-up">
-              <button onClick={handleCopy} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-700 dark:text-gray-200 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 font-bold transition-colors">
-                <Copy className="w-[18px] h-[18px]"/> Copy Text
-              </button>
-              <button onClick={() => {setIsEditing(true); setShowMenu(false);}} className="w-full text-left px-4 py-3.5 text-[14px] text-indigo-600 dark:text-indigo-400 flex items-center gap-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700">
-                <Edit3 className="w-[18px] h-[18px]"/> Edit Post
-              </button>
-              <button onClick={handleDeletePost} className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-2.5 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700">
-                <Trash2 className="w-[18px] h-[18px]"/> Delete Post
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-      
-      <div className="px-5 py-4">
-        {isEditing ? (
-          <div>
-             <textarea
-               value={editContent} onChange={(e) => setEditContent(e.target.value)}
-               className="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-chatverse transition-all resize-none text-[15px]"
-               rows="4"
-             />
-             <div className="flex justify-end gap-2 mt-3">
-               <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-[13px] font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
-               <button onClick={handleEditSave} className="px-4 py-2 text-[13px] font-bold bg-chatverse text-white rounded-lg hover:bg-indigo-700 shadow-sm">Save Changes</button>
-             </div>
-          </div>
-        ) : (
-          <p className="text-gray-800 dark:text-gray-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
-            {post.content}
-          </p>
-        )}
-      </div>
-      
-      <div className="flex items-center gap-6 px-5 py-4 border-t border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/50">
-        <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-          <Heart className="w-5 h-5" /> <span className="text-[14px] font-bold">{Number(post.like_count) || 0}</span>
-        </div>
-        <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-          <MessageCircle className="w-5 h-5" /> <span className="text-[14px] font-bold">{Number(post.comment_count) || 0}</span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
+import { PostItem } from './HomeFeed'; // We reuse the Universal PostItem
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -272,16 +159,16 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* POST VIEW MODAL */}
+      {/* FULL POST VIEW MODAL */}
       {selectedPost && (
         <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedPost(null)}>
-          <div className="w-full max-w-md bg-transparent flex flex-col items-end" onClick={e => e.stopPropagation()}>
-             <button onClick={() => setSelectedPost(null)} className="mb-4 p-2.5 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-md transition-colors"><X className="w-6 h-6"/></button>
-             <ProfilePostItem 
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto no-scrollbar rounded-[24px]" onClick={e => e.stopPropagation()}>
+             <PostItem 
                post={selectedPost} 
+               isModal={true}
+               onClose={() => setSelectedPost(null)}
                onPostUpdate={(id, content) => { updateLocalPost(id, content); setSelectedPost({...selectedPost, content}); }} 
                onPostDelete={(id) => { removeLocalPost(id); setSelectedPost(null); }} 
-               onClose={() => setSelectedPost(null)}
              />
           </div>
         </div>

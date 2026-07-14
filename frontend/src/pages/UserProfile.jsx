@@ -1,24 +1,9 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, UserPlus, MessageSquare, Grid, Check, Loader, UserCheck, MoreVertical, Star, BellOff, Shield, Ban, UserMinus, Heart, MessageCircle, X, BadgeCheck } from 'lucide-react';
+import { ArrowLeft, UserPlus, MessageSquare, Grid, Check, Loader, UserCheck, MoreVertical, Star, BellOff, Shield, Ban, UserMinus, ChevronRight, BadgeCheck } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
-
-// Helper for formatting time
-const timeAgo = (dateString) => {
-  if (!dateString) return 'Just now';
-  const date = new Date(dateString.endsWith('Z') ? dateString : `${dateString}Z`);
-  const now = new Date();
-  const seconds = Math.round((now - date) / 1000);
-  if (seconds < 60) return 'Just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-};
+import { PostItem } from './HomeFeed'; 
 
 export default function UserProfile() {
   const navigate = useNavigate();
@@ -26,19 +11,16 @@ export default function UserProfile() {
   const user = location.state?.user || {};
   
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || {};
-  const isMe = user.unique_id === currentUser.unique_id; 
 
   const [userPosts, setUserPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bioText, setBioText] = useState(user.bio || ""); 
   
-  // Friendship Status States
   const [requestStatus, setRequestStatus] = useState('loading'); 
   const [requestId, setRequestId] = useState(null); 
 
-  // UI / Modal States
   const [showMenu, setShowMenu] = useState(false);
-  const [selectedPost, setSelectedPost] = useState(null); // Post Modal State
+  const [selectedPost, setSelectedPost] = useState(null); 
   const [isMuted, setIsMuted] = useState(localStorage.getItem(`cv_mute_${user.unique_id}`) === 'true');
   const [isFavorite, setIsFavorite] = useState(localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true');
   const [customPrivacy, setCustomPrivacy] = useState(localStorage.getItem(`cv_privacy_${user.unique_id}`) === 'true');
@@ -46,6 +28,12 @@ export default function UserProfile() {
   useEffect(() => {
     if (!user.unique_id) {
       navigate('/chats');
+      return;
+    }
+
+    // FIX: Redirect if opening own profile to ensure 100% UI consistency
+    if (user.unique_id === currentUser.unique_id) {
+      navigate('/profile', { replace: true });
       return;
     }
 
@@ -177,38 +165,36 @@ export default function UserProfile() {
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">Profile</h1>
         </div>
         
-        {!isMe && (
-          <div className="relative">
-            <button onClick={() => setShowMenu(!showMenu)} className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-              <MoreVertical className="w-[22px] h-[22px]" />
-            </button>
+        <div className="relative">
+          <button onClick={() => setShowMenu(!showMenu)} className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+            <MoreVertical className="w-[22px] h-[22px]" />
+          </button>
 
-            {showMenu && <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)}></div>}
-            
-            {showMenu && (
-              <div className="absolute right-0 top-12 w-56 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-40 animate-slide-up">
-                <button onClick={toggleFavorite} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors">
-                  <Star className={`w-[18px] h-[18px] ${isFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} /> 
-                  {isFavorite ? 'Remove from Favorites' : 'Mark as Favorite'}
-                </button>
-                
-                <button onClick={toggleMute} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors border-t border-gray-50 dark:border-gray-700/50">
-                  <BellOff className={`w-[18px] h-[18px] ${isMuted ? 'text-red-400' : ''}`} /> 
-                  {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
-                </button>
-                
-                <button onClick={toggleCustomPrivacy} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors border-t border-gray-50 dark:border-gray-700/50">
-                  <Shield className={`w-[18px] h-[18px] ${customPrivacy ? 'text-green-500' : ''}`} /> 
-                  {customPrivacy ? 'Disable Custom Privacy' : 'Enable Custom Privacy'}
-                </button>
+          {showMenu && <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)}></div>}
+          
+          {showMenu && (
+            <div className="absolute right-0 top-12 w-56 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-40 animate-slide-up">
+              <button onClick={toggleFavorite} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors">
+                <Star className={`w-[18px] h-[18px] ${isFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} /> 
+                {isFavorite ? 'Remove from Favorites' : 'Mark as Favorite'}
+              </button>
+              
+              <button onClick={toggleMute} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors border-t border-gray-50 dark:border-gray-700/50">
+                <BellOff className={`w-[18px] h-[18px] ${isMuted ? 'text-red-400' : ''}`} /> 
+                {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
+              </button>
+              
+              <button onClick={toggleCustomPrivacy} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors border-t border-gray-50 dark:border-gray-700/50">
+                <Shield className={`w-[18px] h-[18px] ${customPrivacy ? 'text-green-500' : ''}`} /> 
+                {customPrivacy ? 'Disable Custom Privacy' : 'Enable Custom Privacy'}
+              </button>
 
-                <button onClick={handleBlock} className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-3 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-100 dark:border-gray-700/80">
-                  <Ban className="w-[18px] h-[18px]" /> Block User
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+              <button onClick={handleBlock} className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-3 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-100 dark:border-gray-700/80">
+                <Ban className="w-[18px] h-[18px]" /> Block User
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="bg-white dark:bg-gray-800 px-6 py-8 shadow-sm border-b border-gray-100 dark:border-gray-700 flex flex-col items-center relative rounded-b-[24px] z-10">
@@ -216,7 +202,7 @@ export default function UserProfile() {
           <div className="w-full h-full bg-white dark:bg-gray-900 rounded-full flex items-center justify-center uppercase">
             <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-tr from-chatverse to-purple-500">{user.username?.charAt(0) || '?'}</span>
           </div>
-          {isFavorite && !isMe && (
+          {isFavorite && (
             <div className="absolute -bottom-1 -right-1 bg-yellow-400 p-1.5 rounded-full border-2 border-white dark:border-gray-800 shadow-sm">
               <Star className="w-3.5 h-3.5 text-white fill-white" />
             </div>
@@ -232,45 +218,39 @@ export default function UserProfile() {
           {bioText || "Available on ChatVerse ✨"}
         </p>
         
-        {isMe ? (
-          <div className="flex items-center justify-center mt-6 w-full px-2 py-3 bg-gray-100 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-            <p className="text-gray-500 dark:text-gray-400 font-bold text-[14px]">👁️ This is how your profile looks to others</p>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 mt-6 w-full px-2">
-            <button 
-              onClick={handleMessage}
-              className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-2.5 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center gap-2 transition-colors shadow-sm"
-            >
-              <MessageSquare className="w-5 h-5" /> Message
-            </button>
-            
-            {requestStatus === 'loading' || requestStatus === 'loading_action' ? (
-               <button disabled className="flex-1 bg-gray-200 dark:bg-gray-700 text-gray-500 font-semibold py-2.5 rounded-xl flex items-center justify-center">
-                 <Loader className="w-5 h-5 animate-spin" />
-               </button>
-            ) : requestStatus === 'friends' ? (
-               <button onClick={handleUnfriend} className="flex-1 bg-indigo-50 dark:bg-indigo-900/30 text-chatverse dark:text-indigo-400 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 border border-indigo-100 dark:border-indigo-800/50 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors shadow-sm group">
-                 <UserCheck className="w-5 h-5 group-hover:hidden" />
-                 <UserMinus className="w-5 h-5 hidden group-hover:block" />
-                 <span className="group-hover:hidden">Friends</span>
-                 <span className="hidden group-hover:block">Unfriend</span>
-               </button>
-            ) : requestStatus === 'sent' ? (
-               <button disabled className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 border border-gray-200 dark:border-gray-600">
-                 <Check className="w-5 h-5" /> Request Sent
-               </button>
-            ) : requestStatus === 'received' ? (
-               <button onClick={handleAcceptRequest} className="flex-1 bg-green-500 text-white font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 hover:bg-green-600 transition-colors shadow-md hover:shadow-lg">
-                 <Check className="w-5 h-5" /> Accept
-               </button>
-            ) : (
-               <button onClick={handleSendRequest} className="flex-1 bg-chatverse text-white font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg">
-                 <UserPlus className="w-5 h-5" /> Add Friend
-               </button>
-            )}
-          </div>
-        )}
+        <div className="flex items-center gap-3 mt-6 w-full px-2">
+          <button 
+            onClick={handleMessage}
+            className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-2.5 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center gap-2 transition-colors shadow-sm"
+          >
+            <MessageSquare className="w-5 h-5" /> Message
+          </button>
+          
+          {requestStatus === 'loading' || requestStatus === 'loading_action' ? (
+             <button disabled className="flex-1 bg-gray-200 dark:bg-gray-700 text-gray-500 font-semibold py-2.5 rounded-xl flex items-center justify-center">
+               <Loader className="w-5 h-5 animate-spin" />
+             </button>
+          ) : requestStatus === 'friends' ? (
+             <button onClick={handleUnfriend} className="flex-1 bg-indigo-50 dark:bg-indigo-900/30 text-chatverse dark:text-indigo-400 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 border border-indigo-100 dark:border-indigo-800/50 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors shadow-sm group">
+               <UserCheck className="w-5 h-5 group-hover:hidden" />
+               <UserMinus className="w-5 h-5 hidden group-hover:block" />
+               <span className="group-hover:hidden">Friends</span>
+               <span className="hidden group-hover:block">Unfriend</span>
+             </button>
+          ) : requestStatus === 'sent' ? (
+             <button disabled className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 border border-gray-200 dark:border-gray-600">
+               <Check className="w-5 h-5" /> Request Sent
+             </button>
+          ) : requestStatus === 'received' ? (
+             <button onClick={handleAcceptRequest} className="flex-1 bg-green-500 text-white font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 hover:bg-green-600 transition-colors shadow-md hover:shadow-lg">
+               <Check className="w-5 h-5" /> Accept
+             </button>
+          ) : (
+             <button onClick={handleSendRequest} className="flex-1 bg-chatverse text-white font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg">
+               <UserPlus className="w-5 h-5" /> Add Friend
+             </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar pb-24 bg-gray-50 dark:bg-gray-900 mt-2">
@@ -280,7 +260,7 @@ export default function UserProfile() {
         
         {loading ? (
           <div className="flex justify-center mt-12"><Loader className="w-7 h-7 text-chatverse animate-spin" /></div>
-        ) : !isMe && requestStatus !== 'friends' ? (
+        ) : requestStatus !== 'friends' ? (
           <div className="py-20 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 px-6 text-center">
             <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center mb-4 shadow-sm border border-gray-100 dark:border-gray-700">
               <Shield className="w-7 h-7 text-gray-300 dark:text-gray-600" />
@@ -312,41 +292,16 @@ export default function UserProfile() {
         )}
       </div>
 
-      {/* READ-ONLY POST VIEW MODAL */}
+      {/* FULL POST VIEW MODAL */}
       {selectedPost && (
         <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedPost(null)}>
-          <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-[24px] shadow-2xl overflow-hidden border border-gray-100 dark:border-gray-700" onClick={e => e.stopPropagation()}>
-             {/* Header */}
-             <div className="flex justify-between items-center px-5 py-4 border-b border-gray-50 dark:border-gray-700/60">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm uppercase">
-                    {selectedPost.username?.charAt(0) || 'U'}
-                  </div>
-                  <div className="flex flex-col">
-                    <h3 className="font-bold text-gray-900 dark:text-white text-[15px] flex items-center gap-1">
-                      {selectedPost.username}
-                      {selectedPost.is_verified && <BadgeCheck className="w-[14px] h-[14px] text-[#1d9bf0]" />}
-                    </h3>
-                    <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500">{timeAgo(selectedPost.created_at)}</p>
-                  </div>
-                </div>
-                <button onClick={() => setSelectedPost(null)} className="p-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full text-gray-600 dark:text-gray-300 transition-colors"><X className="w-5 h-5"/></button>
-             </div>
-             
-             {/* Body */}
-             <div className="px-5 py-4">
-               <p className="text-gray-800 dark:text-gray-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">{selectedPost.content}</p>
-             </div>
-             
-             {/* Stats */}
-             <div className="flex items-center gap-6 px-5 py-4 border-t border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/50">
-                <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                  <Heart className="w-5 h-5" /> <span className="text-[14px] font-bold">{Number(selectedPost.like_count) || 0}</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                  <MessageCircle className="w-5 h-5" /> <span className="text-[14px] font-bold">{Number(selectedPost.comment_count) || 0}</span>
-                </div>
-             </div>
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto no-scrollbar rounded-[24px]" onClick={e => e.stopPropagation()}>
+             <PostItem 
+               post={selectedPost} 
+               isModal={true}
+               onClose={() => setSelectedPost(null)}
+               /* Update/Delete disabled for others' profiles naturally by `isMyPost` check */
+             />
           </div>
         </div>
       )}
