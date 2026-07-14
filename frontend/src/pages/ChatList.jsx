@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, UserPlus, Loader, MessageSquare, ChevronRight, Star, ArrowLeft, BadgeCheck } from 'lucide-react';
+import { Search, Loader, MessageSquare, ChevronRight, Star, ArrowLeft, BadgeCheck, Trash2, UserPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import BottomNav from '../components/BottomNav';
@@ -32,9 +32,16 @@ export default function ChatList() {
   const [typingUsers, setTypingUsers] = useState({});
   const typingTimeouts = useRef({});
 
+  // Friends Modal states (kept intact for safety/future use)
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [friendsList, setFriendsList] = useState([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
+
+  // LONG PRESS DELETE STATES & REFS
+  const [longPressedChat, setLongPressedChat] = useState(null);
+  const pressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
+  const touchStartPos = useRef({ x: 0, y: 0 });
 
   const fetchRecentChats = async () => {
     try {
@@ -83,14 +90,48 @@ export default function ChatList() {
     return () => clearTimeout(delay);
   }, [searchQuery]);
 
-  const handleOpenFriendsModal = async () => {
-    setShowFriendsModal(true);
-    setFriendsLoading(true);
+  // LONG PRESS LOGIC (WhatsApp Style)
+  const handlePointerDown = (e, chat) => {
+    longPressTriggered.current = false;
+    touchStartPos.current = { x: e.clientX, y: e.clientY };
+    pressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setLongPressedChat(chat);
+      if (window.navigator?.vibrate) window.navigator.vibrate(50); // Haptic feedback on long press
+    }, 500); 
+  };
+
+  const handlePointerMove = (e) => {
+    const dx = Math.abs(e.clientX - touchStartPos.current.x);
+    const dy = Math.abs(e.clientY - touchStartPos.current.y);
+    // If finger moves more than 10px, cancel the long press
+    if ((dx > 10 || dy > 10) && pressTimer.current) {
+      clearTimeout(pressTimer.current);
+    }
+  };
+
+  const handlePointerUpOrLeave = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
+  const handleChatClick = (e, chat) => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return; // Do not open chat if we just finished a long press
+    }
+    navigate(`/chat/${chat.unique_id}`, { state: { name: chat.username, id: chat.unique_id } });
+  };
+
+  // ACTUAL DELETE FUNCTION (Runs from Modal)
+  const confirmDeleteChat = async () => {
+    if (!longPressedChat) return;
     try {
-      const res = await api.get('/friends');
-      setFriendsList(res.data);
-    } catch (err) { console.error("Error fetching friends"); }
-    finally { setFriendsLoading(false); }
+      await api.delete(`/chats/${longPressedChat.unique_id}`);
+      setRecentChats(prev => prev.filter(chat => chat.unique_id !== longPressedChat.unique_id));
+      setLongPressedChat(null);
+    } catch (err) {
+      alert("Failed to delete chat.");
+    }
   };
 
   const getProcessedChats = () => {
@@ -111,9 +152,7 @@ export default function ChatList() {
       <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Messages</h1>
-          <button onClick={handleOpenFriendsModal} className="text-chatverse dark:text-indigo-400 bg-indigo-50 dark:bg-gray-700 p-2.5 rounded-full hover:bg-chatverse hover:text-white dark:hover:bg-indigo-500 transition-all shadow-sm">
-            <UserPlus className="w-5 h-5" />
-          </button>
+          {/* Plus icon has been removed from here as per request */}
         </div>
         <div className="relative">
           <Search className="absolute left-4 top-3.5 text-gray-400 dark:text-gray-500 w-5 h-5" />
@@ -128,7 +167,6 @@ export default function ChatList() {
 
       <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar pb-24 pt-2">
         {loading ? (
-           /* NAYA SKELETON LOADER FOR CHAT LIST */
            <div className="flex flex-col gap-5 px-5 py-4 mt-2">
              {[1, 2, 3, 4, 5, 6].map((i) => (
                <div key={i} className="flex items-center gap-4 animate-pulse">
@@ -179,11 +217,15 @@ export default function ChatList() {
               return (
                 <div 
                   key={user.unique_id} 
-                  onClick={() => navigate(`/chat/${user.unique_id}`, { state: { name: user.username, id: user.unique_id } })} 
-                  className={`flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-all active:scale-[0.98] active:opacity-70 border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''}`}
+                  onPointerDown={(e) => handlePointerDown(e, user)}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUpOrLeave}
+                  onPointerLeave={handlePointerUpOrLeave}
+                  onClick={(e) => handleChatClick(e, user)}
+                  className={`group flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-all active:scale-[0.98] active:opacity-70 border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''} ${longPressedChat?.unique_id === user.unique_id ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
                 >
                   
-                  <div className="w-13 h-13 shrink-0 relative">
+                  <div className="w-13 h-13 shrink-0 relative pointer-events-none">
                     <div className="w-12 h-12 bg-gradient-to-tr from-chatverse to-purple-500 p-[2px] rounded-full shadow-sm">
                       <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-chatverse dark:text-indigo-400 font-bold text-lg uppercase">{user.username.charAt(0)}</div>
                     </div>
@@ -194,18 +236,21 @@ export default function ChatList() {
                     )}
                   </div>
                   
-                  <div className="flex-1 min-w-0 pr-1">
+                  <div className="flex-1 min-w-0 pr-1 pointer-events-none">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                         <h3 className={`text-[16px] truncate flex items-center ${isUnread ? 'font-black text-gray-900 dark:text-white' : 'font-bold text-gray-900 dark:text-gray-100'}`}>
+                         <h3 className={`text-[16px] truncate flex items-center ${isUnread ? 'font-bold text-gray-900 dark:text-white' : 'font-bold text-gray-900 dark:text-gray-100'}`}>
                            {user.username}
                            {user.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
                          </h3>
                          {hasStar && <span className="text-[9px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-[4px] leading-none tracking-wide">PINNED</span>}
                       </div>
-                      <span className={`text-[11.5px] whitespace-nowrap ${isUnread ? 'font-bold text-chatverse dark:text-indigo-400' : 'font-medium text-gray-400 dark:text-gray-500'}`}>
-                         {formatTime(user.last_message_time)}
-                      </span>
+                      
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[11.5px] whitespace-nowrap ${isUnread ? 'font-bold text-chatverse dark:text-indigo-400' : 'font-medium text-gray-400 dark:text-gray-500'}`}>
+                           {formatTime(user.last_message_time)}
+                        </span>
+                      </div>
                     </div>
                     
                     <div className="flex items-center justify-between mt-0.5">
@@ -238,6 +283,38 @@ export default function ChatList() {
         )}
       </div>
 
+      {/* LONG PRESS DELETE MODAL (WhatsApp Style Action Menu) */}
+      {longPressedChat && (
+        <div className="absolute inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={() => setLongPressedChat(null)}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-[24px] p-5 shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center mb-6 mt-2">
+              <div className="w-16 h-16 bg-red-50 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mb-3">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="font-black text-[18px] text-gray-900 dark:text-white">Delete Chat?</h3>
+              <p className="text-[14px] text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">
+                Are you sure you want to permanently delete your chat with <span className="font-bold text-gray-700 dark:text-gray-300">"{longPressedChat.username}"</span>?
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={confirmDeleteChat}
+                className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 rounded-xl transition-colors shadow-sm"
+              >
+                Yes, Delete Chat
+              </button>
+              <button 
+                onClick={() => setLongPressedChat(null)}
+                className="w-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white font-bold py-3.5 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* (Friend Modal component is kept here intact for any future use, but button is removed) */}
       {showFriendsModal && (
         <div className="absolute inset-0 z-[100] bg-[#f4f6f8] dark:bg-gray-900 flex flex-col animate-slide-up">
           <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm flex items-center gap-4">

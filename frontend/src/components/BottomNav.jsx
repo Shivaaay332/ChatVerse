@@ -36,7 +36,7 @@ export default function BottomNav() {
   ];
 
   return (
-    <div className="absolute bottom-0 w-full glass-nav flex justify-between items-center px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+16px)] z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]">
+    <div className="absolute bottom-0 w-full bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-800/50 flex justify-between items-center px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+8px)] z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] dark:shadow-none transition-colors">
       {navItems.map((item) => {
         const isActive = location.pathname.includes(item.path);
         const Icon = item.icon;
@@ -46,10 +46,10 @@ export default function BottomNav() {
             key={item.id}
             onClick={() => navigate(item.path)}
             className={`flex flex-col items-center gap-1 transition-all duration-300 ease-out ${
-              isActive ? 'text-chatverse -translate-y-1' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+              isActive ? 'text-chatverse -translate-y-1' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-400'
             }`}
           >
-            <div className={`relative p-2 rounded-full transition-all duration-300 ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}>
+            <div className={`relative p-2 rounded-full transition-all duration-300 ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/40' : ''}`}>
               <Icon className={`w-[22px] h-[22px] ${isActive ? 'stroke-[2.5px]' : 'stroke-[2px]'}`} />
               
               {/* Premium Red Dot for Notifications */}

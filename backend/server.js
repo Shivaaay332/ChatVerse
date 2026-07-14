@@ -33,9 +33,7 @@ const initializeDatabase = async () => {
       CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, type TEXT NOT NULL, reference_id INTEGER, content TEXT, is_read BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     `);
 
-    // Forcefully add the 'is_verified' column to EXISTING databases
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;`);
-
     console.log("✅ Database Tables Auto-Synced! Verified Column Active.");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
@@ -87,18 +85,13 @@ app.put('/api/users/me/bio', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE users SET bio = $1 WHERE unique_id = $2`, [req.body.bio, req.user.id]); res.status(200).json({ message: 'Bio updated' }); } catch (err) { res.status(500).json({ error: 'Error updating bio' }); }
 });
 
-// NEW: GET VERIFIED API
 app.put('/api/users/me/verify', authenticateToken, async (req, res) => {
   try {
     await db.query(`UPDATE users SET is_verified = TRUE WHERE unique_id = $1`, [req.user.id]);
     res.status(200).json({ message: 'Account verified successfully!' });
-  } catch (err) { 
-    console.error(err);
-    res.status(500).json({ error: 'Error verifying account' }); 
-  }
+  } catch (err) { res.status(500).json({ error: 'Error verifying account' }); }
 });
 
-// STRICT GDPR DELETE ACCOUNT API
 app.delete('/api/users/me', authenticateToken, async (req, res) => {
   try {
     const { password } = req.body;
@@ -109,10 +102,7 @@ app.delete('/api/users/me', authenticateToken, async (req, res) => {
     if (!isValid) return res.status(400).json({ error: 'Incorrect password!' });
     await db.query('DELETE FROM users WHERE unique_id = $1', [req.user.id]);
     res.status(200).json({ message: 'Account permanently deleted' });
-  } catch (err) { 
-    console.error('Error deleting account:', err);
-    res.status(500).json({ error: 'Error deleting account' }); 
-  }
+  } catch (err) { res.status(500).json({ error: 'Error deleting account' }); }
 });
 
 app.post('/api/users/block', authenticateToken, async (req, res) => {
@@ -183,12 +173,10 @@ app.get('/api/friends', authenticateToken, async (req, res) => {
     `;
     const result = await db.query(query, [req.user.id]);
     res.status(200).json(result.rows);
-  } catch (err) { 
-    res.status(500).json({ error: 'Error fetching friends list' }); 
-  }
+  } catch (err) { res.status(500).json({ error: 'Error fetching friends' }); }
 });
 
-// --- POSTS & COMMENTS ---
+// --- POSTS & COMMENTS (FIXED FOR PRIVACY) ---
 app.post('/api/posts', authenticateToken, async (req, res) => {
   try { 
     const newPost = await db.query(`INSERT INTO posts (user_id, content) VALUES ($1, $2) RETURNING *`, [req.user.id, req.body.content]);
@@ -199,12 +187,50 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error post' }); }
 });
 
+// FIX: Sirf Friends aur Khud ki posts dikhayega
 app.get('/api/posts', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT p.id, p.content, p.created_at, u.unique_id, u.username, u.is_verified, (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count FROM posts p JOIN users u ON p.user_id = u.unique_id ORDER BY p.created_at DESC LIMIT 50`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching' }); }
+  try { 
+    const query = `
+      SELECT p.id, p.content, p.created_at, u.unique_id, u.username, u.is_verified, 
+      (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, 
+      EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, 
+      (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.unique_id 
+      WHERE p.user_id = $1 OR p.user_id IN (
+        SELECT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END
+        FROM friend_requests
+        WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'
+      )
+      ORDER BY p.created_at DESC LIMIT 50
+    `;
+    res.status(200).json((await db.query(query, [req.user.id])).rows); 
+  } catch (err) { res.status(500).json({ error: 'Error fetching' }); }
 });
+
+// FIX: Dusri profile ki posts sirf tab dikhegi jab user accepted friend ho ya khud ho
 app.get('/api/posts/user/:id', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT p.id, p.content, p.created_at, u.unique_id, u.username, u.is_verified, (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count FROM posts p JOIN users u ON p.user_id = u.unique_id WHERE p.user_id = $2 ORDER BY p.created_at DESC`, [req.user.id, req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error user posts' }); }
+  try { 
+    const query = `
+      SELECT p.id, p.content, p.created_at, u.unique_id, u.username, u.is_verified, 
+      (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count, 
+      EXISTS(SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1) as has_liked, 
+      (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.unique_id 
+      WHERE p.user_id = $2 AND (
+        $2 = $1 OR EXISTS (
+          SELECT 1 FROM friend_requests
+          WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1))
+          AND status = 'accepted'
+        )
+      )
+      ORDER BY p.created_at DESC
+    `;
+    res.status(200).json((await db.query(query, [req.user.id, req.params.id])).rows); 
+  } catch (err) { res.status(500).json({ error: 'Error user posts' }); }
 });
+
 app.put('/api/posts/:id', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE posts SET content = $1 WHERE id = $2 AND user_id = $3`, [req.body.content, req.params.id, req.user.id]); res.status(200).json({ message: 'Updated' }); } catch (err) { res.status(500).json({ error: 'Error editing post' }); }
 });
@@ -230,7 +256,7 @@ app.post('/api/posts/:id/like', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error like' }); }
 });
 app.get('/api/posts/:id/likes', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT u.unique_id, u.username, u.bio, u.is_verified FROM post_likes pl JOIN users u ON pl.user_id = u.unique_id WHERE pl.post_id = $1`, [req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching likes list' }); }
+  try { res.status(200).json((await db.query(`SELECT u.unique_id, u.username, u.bio, u.is_verified FROM post_likes pl JOIN users u ON pl.user_id = u.unique_id WHERE pl.post_id = $1`, [req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching likes' }); }
 });
 
 app.get('/api/posts/:id/comments', authenticateToken, async (req, res) => {
@@ -246,7 +272,6 @@ app.post('/api/posts/:id/comments', authenticateToken, async (req, res) => {
     if (postData.rows[0].user_id !== req.user.id) {
        await db.query(`INSERT INTO notifications (user_id, sender_id, type, reference_id, content) VALUES ($1, $2, 'post_comment', $3, $4)`, [postData.rows[0].user_id, req.user.id, result.rows[0].id, comment]);
     }
-
     const mentions = comment.match(/@([a-zA-Z0-9_]+)/g);
     if (mentions) {
         for(const m of mentions) {
@@ -310,6 +335,7 @@ app.get('/api/chats/recent', authenticateToken, async (req, res) => {
           ) as rn
         FROM messages m
         WHERE (m.sender_id = $1 OR m.receiver_id = $1)
+        AND m.is_deleted_for_me = FALSE
       )
       SELECT 
         u.unique_id, 
@@ -321,7 +347,7 @@ app.get('/api/chats/recent', authenticateToken, async (req, res) => {
         rm.sender_id,
         rm.is_deleted_for_everyone,
         rm.is_deleted_for_me,
-        (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read') AS unread_count
+        (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read' AND is_deleted_for_me = FALSE) AS unread_count
       FROM RankedMessages rm
       JOIN users u ON u.unique_id = rm.other_user_id
       WHERE rm.rn = 1 
@@ -336,23 +362,31 @@ app.get('/api/chats/recent', authenticateToken, async (req, res) => {
 
 app.get('/api/messages/unread/total', authenticateToken, async (req, res) => {
   try {
-    const result = await db.query(`SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND status != 'read'`, [req.user.id]);
+    const result = await db.query(`SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND status != 'read' AND is_deleted_for_me = FALSE`, [req.user.id]);
     res.status(200).json({ unreadMessages: parseInt(result.rows[0].count) });
   } catch (err) { res.status(500).json({ error: 'Error counting unread messages' }); }
 });
 
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
-    const messages = await db.query(`SELECT * FROM messages WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1) ORDER BY created_at ASC`, [req.user.id, req.params.otherUserId]);
-    await db.query(`UPDATE messages SET status = 'read' WHERE sender_id = $1 AND receiver_id = $2 AND status != 'read'`, [req.params.otherUserId, req.user.id]);
+    const messages = await db.query(`SELECT * FROM messages WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)) AND is_deleted_for_me = FALSE ORDER BY created_at ASC`, [req.user.id, req.params.otherUserId]);
+    await db.query(`UPDATE messages SET status = 'read' WHERE sender_id = $1 AND receiver_id = $2 AND status != 'read' AND is_deleted_for_me = FALSE`, [req.params.otherUserId, req.user.id]);
     res.status(200).json(messages.rows);
   } catch (err) { res.status(500).json({ error: 'Error history' }); }
 });
+
 app.delete('/api/messages/forme/:id', authenticateToken, async (req, res) => {
-  try { await db.query(`UPDATE messages SET is_deleted_for_me = TRUE WHERE id = $1 AND (sender_id = $2 OR receiver_id = $2)`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } catch (err) { res.status(500).json({ error: 'Error delete msg' }); }
+  try { 
+    await db.query(`DELETE FROM messages WHERE id = $1 AND (sender_id = $2 OR receiver_id = $2)`, [req.params.id, req.user.id]); 
+    res.status(200).json({ message: 'Permanently deleted message' }); 
+  } catch (err) { res.status(500).json({ error: 'Error delete msg' }); }
 });
+
 app.delete('/api/chats/:otherUserId', authenticateToken, async (req, res) => {
-  try { await db.query(`UPDATE messages SET is_deleted_for_me = TRUE WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, req.params.otherUserId]); res.status(200).json({ message: 'Chat cleared' }); } catch (err) { res.status(500).json({ error: 'Error clear' }); }
+  try { 
+    await db.query(`DELETE FROM messages WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, req.params.otherUserId]); 
+    res.status(200).json({ message: 'Chat permanently wiped' }); 
+  } catch (err) { res.status(500).json({ error: 'Error clear' }); }
 });
 
 // --- SOCKET.IO ---
@@ -376,6 +410,7 @@ io.on('connection', (socket) => {
             ) as rn
           FROM messages m
           WHERE (m.sender_id = $1 OR m.receiver_id = $1)
+          AND m.is_deleted_for_me = FALSE
         )
         SELECT 
           u.unique_id, 
@@ -387,7 +422,7 @@ io.on('connection', (socket) => {
           rm.sender_id,
           rm.is_deleted_for_everyone,
           rm.is_deleted_for_me,
-          (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read') AS unread_count
+          (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read' AND is_deleted_for_me = FALSE) AS unread_count
         FROM RankedMessages rm
         JOIN users u ON u.unique_id = rm.other_user_id
         WHERE rm.rn = 1 

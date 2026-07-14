@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Edit3, Grid, Loader, Check, X, Trash2, Heart, MessageCircle, MoreVertical, Copy } from 'lucide-react';
+import { ArrowLeft, Edit3, Grid, Loader, Check, X, Trash2, Heart, MessageCircle, MoreVertical, Copy, ChevronRight, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav'; 
 import api from '../api'; 
@@ -20,8 +20,8 @@ const timeAgo = (dateString) => {
   return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 };
 
-// Profile Post Component
-const ProfilePostItem = ({ post, onPostUpdate, onPostDelete }) => {
+// Profile Post Component (Used inside the Modal)
+const ProfilePostItem = ({ post, onPostUpdate, onPostDelete, onClose }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
@@ -52,19 +52,19 @@ const ProfilePostItem = ({ post, onPostUpdate, onPostDelete }) => {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 mb-4 p-5 rounded-[24px] shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] dark:shadow-none border border-gray-50 dark:border-gray-700 transition-all">
-      <div className="flex justify-between items-center mb-3">
+    <div className="bg-white dark:bg-gray-800 w-full rounded-[24px] shadow-2xl border border-gray-100 dark:border-gray-700 transition-all overflow-hidden relative">
+      <div className="flex justify-between items-center px-5 py-4 border-b border-gray-50 dark:border-gray-700/60">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm uppercase">
             {post.username?.charAt(0) || 'U'}
           </div>
           <div className="flex flex-col">
-            <h3 className="font-bold text-gray-900 dark:text-white text-[14px]">{post.username}</h3>
+            <h3 className="font-bold text-gray-900 dark:text-white text-[15px]">{post.username}</h3>
             <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500">{timeAgo(post.created_at)}</p>
           </div>
         </div>
         
-        <div className="relative">
+        <div className="relative flex items-center gap-2">
           <button onClick={() => setShowMenu(!showMenu)} className="text-gray-400 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
             <MoreVertical className="w-5 h-5" />
           </button>
@@ -85,32 +85,32 @@ const ProfilePostItem = ({ post, onPostUpdate, onPostDelete }) => {
         </div>
       </div>
       
-      {isEditing ? (
-        <div className="py-2">
-           <textarea
-             value={editContent} onChange={(e) => setEditContent(e.target.value)}
-             className="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-chatverse transition-all resize-none text-[14px]"
-             rows="3"
-           />
-           <div className="flex justify-end gap-2 mt-2">
-             <button onClick={() => setIsEditing(false)} className="px-4 py-1.5 text-[12px] font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
-             <button onClick={handleEditSave} className="px-4 py-1.5 text-[12px] font-bold bg-chatverse text-white rounded-lg hover:bg-indigo-700 shadow-sm">Save</button>
-           </div>
-        </div>
-      ) : (
-        <div className="py-1">
-          <p className="text-gray-800 dark:text-gray-200 text-[14px] leading-[1.6] whitespace-pre-wrap font-medium">
+      <div className="px-5 py-4">
+        {isEditing ? (
+          <div>
+             <textarea
+               value={editContent} onChange={(e) => setEditContent(e.target.value)}
+               className="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-chatverse transition-all resize-none text-[15px]"
+               rows="4"
+             />
+             <div className="flex justify-end gap-2 mt-3">
+               <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-[13px] font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
+               <button onClick={handleEditSave} className="px-4 py-2 text-[13px] font-bold bg-chatverse text-white rounded-lg hover:bg-indigo-700 shadow-sm">Save Changes</button>
+             </div>
+          </div>
+        ) : (
+          <p className="text-gray-800 dark:text-gray-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
             {post.content}
           </p>
-        </div>
-      )}
+        )}
+      </div>
       
-      <div className="flex items-center gap-6 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/60">
-        <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
-          <Heart className="w-5 h-5" /> <span className="text-[13px] font-bold">{Number(post.like_count) || 0}</span>
+      <div className="flex items-center gap-6 px-5 py-4 border-t border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/50">
+        <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+          <Heart className="w-5 h-5" /> <span className="text-[14px] font-bold">{Number(post.like_count) || 0}</span>
         </div>
-        <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
-          <MessageCircle className="w-5 h-5" /> <span className="text-[13px] font-bold">{Number(post.comment_count) || 0}</span>
+        <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+          <MessageCircle className="w-5 h-5" /> <span className="text-[14px] font-bold">{Number(post.comment_count) || 0}</span>
         </div>
       </div>
     </div>
@@ -128,10 +128,15 @@ export default function Profile() {
   const [userProfile, setUserProfile] = useState(JSON.parse(localStorage.getItem('chatverse_user')) || {});
   const [bioText, setBioText] = useState(userProfile.bio || "Available on ChatVerse ✨");
 
+  // Modals State
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [showFriendsModal, setShowFriendsModal] = useState(false);
+  const [friendsList, setFriendsList] = useState([]);
+  const [loadingFriends, setLoadingFriends] = useState(false);
+
   const fetchData = async () => {
     try {
       const postsRes = await api.get(`/posts/user/${userProfile.unique_id}`);
-      // Sort logic handled in backend
       setMyPosts(Array.isArray(postsRes.data) ? postsRes.data : []);
       
       const statsRes = await api.get(`/users/me/stats`);
@@ -157,6 +162,16 @@ export default function Profile() {
   };
   const removeLocalPost = (id) => {
     setMyPosts(myPosts.filter(p => p.id !== id));
+  };
+
+  const handleOpenFriends = async () => {
+    setShowFriendsModal(true);
+    setLoadingFriends(true);
+    try {
+      const res = await api.get('/friends');
+      setFriendsList(res.data);
+    } catch(err) { console.error(err); }
+    setLoadingFriends(false);
   };
 
   return (
@@ -214,22 +229,25 @@ export default function Profile() {
               <span className="text-[11px] text-gray-400 dark:text-gray-400 uppercase tracking-wider font-bold mt-0.5">Posts</span>
             </div>
             <div className="w-[2px] h-10 bg-gray-200 dark:bg-gray-600 self-center rounded-full"></div>
-            <div className="flex flex-col items-center w-1/2">
+            <div 
+              onClick={handleOpenFriends}
+              className="flex flex-col items-center w-1/2 cursor-pointer hover:opacity-70 transition-opacity"
+            >
               <span className="font-black text-2xl text-gray-900 dark:text-white">{friendCount}</span>
               <span className="text-[11px] text-gray-400 dark:text-gray-400 uppercase tracking-wider font-bold mt-0.5">Friends</span>
             </div>
           </div>
         </div>
 
-        <div className="mt-6 px-1">
-          <div className="flex items-center justify-center mb-4">
+        <div className="mt-4">
+          <div className="flex items-center justify-center mb-2">
             <h3 className="text-[12px] font-black text-gray-400 dark:text-gray-500 tracking-widest uppercase">Your Posts Activity</h3>
           </div>
           
           {loading ? ( 
             <div className="flex justify-center mt-10"><Loader className="w-6 h-6 text-chatverse animate-spin" /></div> 
           ) : myPosts.length === 0 ? ( 
-            <div className="py-12 mx-4 flex flex-col items-center justify-center text-gray-400 bg-white dark:bg-gray-800 rounded-[24px] border border-gray-100 dark:border-gray-700 shadow-sm">
+            <div className="py-12 mx-4 flex flex-col items-center justify-center text-gray-400 bg-white dark:bg-gray-800 rounded-[24px] border border-gray-100 dark:border-gray-700 shadow-sm mt-4">
               <div className="w-16 h-16 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
                 <Grid className="w-7 h-7 text-gray-300 dark:text-gray-500" />
               </div>
@@ -237,14 +255,84 @@ export default function Profile() {
               <p className="text-[13px] font-medium text-gray-400 mt-1">Share your thoughts on the Home feed.</p>
             </div> 
           ) : ( 
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-3 gap-[2px] p-1">
               {myPosts.map((post) => (
-                <ProfilePostItem key={post.id} post={post} onPostUpdate={updateLocalPost} onPostDelete={removeLocalPost} />
+                <div 
+                  key={post.id} 
+                  onClick={() => setSelectedPost(post)}
+                  className="bg-white dark:bg-gray-800 aspect-square p-2 border border-gray-100 dark:border-gray-700 flex flex-col justify-center text-center hover:bg-indigo-50 dark:hover:bg-gray-700 transition-colors cursor-pointer group shadow-sm"
+                >
+                  <p className="text-[11px] sm:text-[13px] text-gray-800 dark:text-gray-200 line-clamp-4 leading-relaxed font-medium group-hover:text-chatverse dark:group-hover:text-indigo-300 transition-colors break-words">
+                    {post.content}
+                  </p>
+                </div>
               ))}
             </div> 
           )}
         </div>
       </div>
+
+      {/* POST VIEW MODAL */}
+      {selectedPost && (
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedPost(null)}>
+          <div className="w-full max-w-md bg-transparent flex flex-col items-end" onClick={e => e.stopPropagation()}>
+             <button onClick={() => setSelectedPost(null)} className="mb-4 p-2.5 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-md transition-colors"><X className="w-6 h-6"/></button>
+             <ProfilePostItem 
+               post={selectedPost} 
+               onPostUpdate={(id, content) => { updateLocalPost(id, content); setSelectedPost({...selectedPost, content}); }} 
+               onPostDelete={(id) => { removeLocalPost(id); setSelectedPost(null); }} 
+               onClose={() => setSelectedPost(null)}
+             />
+          </div>
+        </div>
+      )}
+
+      {/* FRIENDS LIST MODAL */}
+      {showFriendsModal && (
+        <div className="absolute inset-0 z-[100] bg-[#f4f6f8] dark:bg-gray-900 flex flex-col animate-slide-up">
+          <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm flex items-center gap-4">
+            <button onClick={() => setShowFriendsModal(false)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+              <ArrowLeft className="w-[22px] h-[22px]" />
+            </button>
+            <div>
+               <h1 className="text-[19px] font-black text-gray-900 dark:text-white leading-none tracking-tight">Your Friends</h1>
+               <p className="text-[12px] text-gray-500 font-medium mt-1">{friendsList.length} friends</p>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto no-scrollbar">
+             {loadingFriends ? (
+               <div className="flex justify-center py-10"><Loader className="w-7 h-7 text-chatverse animate-spin" /></div>
+             ) : friendsList.length === 0 ? (
+               <div className="text-center py-16 px-6 text-gray-400 font-medium text-[15px] leading-relaxed">
+                 You don't have any friends yet.<br/>Start connecting with people!
+               </div>
+             ) : (
+               <div className="bg-white dark:bg-gray-800 border-y border-gray-100 dark:border-gray-700">
+                 {friendsList.map(friend => (
+                   <div 
+                     key={friend.unique_id} 
+                     onClick={() => { setShowFriendsModal(false); navigate(`/user/${friend.unique_id}`, { state: { user: friend } }) }} 
+                     className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer border-b border-gray-50 dark:border-gray-700 last:border-0 transition-colors"
+                   >
+                      <div className="w-13 h-13 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg uppercase shadow-sm shrink-0">
+                         {friend.username.charAt(0)}
+                      </div>
+                      <div className="flex-1">
+                         <h3 className="font-bold text-[16px] text-gray-900 dark:text-white flex items-center">
+                           {friend.username}
+                           {friend.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
+                         </h3>
+                         <p className="text-[14px] text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{friend.bio}</p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-gray-300 dark:text-gray-600" />
+                   </div>
+                 ))}
+               </div>
+             )}
+          </div>
+        </div>
+      )}
       
       <BottomNav />
     </div>
