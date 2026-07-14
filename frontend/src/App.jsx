@@ -83,13 +83,10 @@ function App() {
     // Outer Background - Blurred abstract gradient for Desktop
     <div className="h-[100dvh] w-screen overflow-hidden overscroll-none bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 dark:from-gray-950 dark:via-[#121212] dark:to-black flex justify-center items-center sm:p-6 transition-colors duration-300">
       
-      {/* Mobile Device Mockup Container for Desktop */}
+      {/* Mobile Device Mockup Container for Desktop (Notch removed for clean view) */}
       <div className="flex-1 w-full h-full sm:max-w-[400px] sm:max-h-[850px] sm:rounded-[45px] sm:shadow-[0_20px_60px_rgba(0,0,0,0.15)] dark:sm:shadow-[0_20px_60px_rgba(0,0,0,0.5)] sm:border-[12px] sm:border-gray-900 dark:sm:border-gray-800 overflow-hidden flex flex-col relative bg-[#f4f6f8] dark:bg-gray-900 transition-colors duration-300 ring-1 ring-black/5 dark:ring-white/10">
-        
-        {/* Faux iPhone Notch (Only visible on desktop/sm screens) */}
-        <div className="hidden sm:block absolute top-0 left-1/2 -translate-x-1/2 w-[120px] h-[24px] bg-gray-900 dark:bg-gray-800 rounded-b-[16px] z-[999]"></div>
 
-        {/* NAYA CODE: OFFLINE BANNER UI */}
+        {/* OFFLINE BANNER UI */}
         {isOffline && (
           <div className="absolute top-0 left-0 w-full bg-red-500/95 backdrop-blur-sm text-white text-[12px] font-bold py-1.5 flex justify-center items-center gap-2 z-[9999] shadow-md transition-all duration-300">
             <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>

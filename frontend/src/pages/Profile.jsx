@@ -3,7 +3,7 @@ import { ArrowLeft, Edit3, Grid, Loader, Check, X, ChevronRight, BadgeCheck } fr
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav'; 
 import api from '../api'; 
-import { PostItem } from './HomeFeed'; // We reuse the Universal PostItem
+import { PostItem } from './HomeFeed'; 
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -15,7 +15,6 @@ export default function Profile() {
   const [userProfile, setUserProfile] = useState(JSON.parse(localStorage.getItem('chatverse_user')) || {});
   const [bioText, setBioText] = useState(userProfile.bio || "Available on ChatVerse ✨");
 
-  // Modals State
   const [selectedPost, setSelectedPost] = useState(null);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [friendsList, setFriendsList] = useState([]);
@@ -64,12 +63,14 @@ export default function Profile() {
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col relative transition-colors overflow-hidden">
       
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
-        <button onClick={() => navigate(-1)} className="p-2 bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <h1 className="text-lg font-black text-gray-900 dark:text-white tracking-tight">My Profile</h1>
-        <div className="w-9"></div> 
+      {/* UNIVERSAL HEADER */}
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-4 z-20 shrink-0 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+            <ArrowLeft className="w-[22px] h-[22px]" />
+          </button>
+          <h1 className="text-[20px] font-black text-gray-900 dark:text-white tracking-tight leading-none">My Profile</h1>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
@@ -159,7 +160,6 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* FULL POST VIEW MODAL */}
       {selectedPost && (
         <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedPost(null)}>
           <div className="w-full max-w-md max-h-[90vh] overflow-y-auto no-scrollbar rounded-[24px]" onClick={e => e.stopPropagation()}>
@@ -174,16 +174,17 @@ export default function Profile() {
         </div>
       )}
 
-      {/* FRIENDS LIST MODAL */}
       {showFriendsModal && (
         <div className="absolute inset-0 z-[100] bg-[#f4f6f8] dark:bg-gray-900 flex flex-col animate-slide-up">
-          <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm flex items-center gap-4">
-            <button onClick={() => setShowFriendsModal(false)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-              <ArrowLeft className="w-[22px] h-[22px]" />
-            </button>
-            <div>
-               <h1 className="text-[19px] font-black text-gray-900 dark:text-white leading-none tracking-tight">Your Friends</h1>
-               <p className="text-[12px] text-gray-500 font-medium mt-1">{friendsList.length} friends</p>
+          <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-4 z-20 shrink-0 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setShowFriendsModal(false)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+                <ArrowLeft className="w-[22px] h-[22px]" />
+              </button>
+              <div>
+                 <h1 className="text-[19px] font-black text-gray-900 dark:text-white leading-none tracking-tight">Your Friends</h1>
+                 <p className="text-[12px] text-gray-500 font-medium mt-1">{friendsList.length} friends</p>
+              </div>
             </div>
           </div>
 

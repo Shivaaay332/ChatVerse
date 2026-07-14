@@ -33,12 +33,16 @@ export default function BlockedUsers() {
   };
 
   return (
-    <div className="h-full w-full bg-gray-50 dark:bg-gray-900 flex flex-col relative transition-colors">
-      <div className="bg-white dark:bg-gray-800 px-4 py-3 shadow-sm flex items-center gap-4 z-10 border-b border-gray-100 dark:border-gray-700">
-        <button onClick={() => navigate(-1)} className="text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded-full transition-colors">
-          <ArrowLeft className="w-6 h-6" />
-        </button>
-        <h1 className="text-xl font-bold text-gray-900 dark:text-white">Blocked Users</h1>
+    <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col relative transition-colors">
+      
+      {/* UNIVERSAL HEADER */}
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-4 z-20 shrink-0 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+            <ArrowLeft className="w-[22px] h-[22px]" />
+          </button>
+          <h1 className="text-[20px] font-black text-gray-900 dark:text-white tracking-tight leading-none">Blocked Users</h1>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar pt-2">

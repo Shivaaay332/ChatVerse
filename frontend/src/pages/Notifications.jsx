@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Check, X, Bell, Loader, Heart, MessageCircle, UserPlus, AtSign, FileText, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
@@ -25,6 +25,12 @@ export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // LONG PRESS STATES
+  const [selectedNotifs, setSelectedNotifs] = useState([]);
+  const pressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
+  const touchStartPos = useRef({ x: 0, y: 0 });
+
   useEffect(() => {
     fetchNotifications();
     markAsRead();
@@ -43,9 +49,45 @@ export default function Notifications() {
     catch (e) { /* ignore silently */ }
   };
 
-  // --- Actions ---
+  // --- Long Press Handlers ---
+  const toggleSelection = (id) => {
+    setSelectedNotifs(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const handlePointerDown = (e, notif) => {
+    if (notif.type === 'friend_request') return; // Cannot bulk delete friend requests
+    longPressTriggered.current = false;
+    touchStartPos.current = { x: e.clientX, y: e.clientY };
+    pressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      if (selectedNotifs.length === 0) {
+        toggleSelection(notif.notif_id);
+        if (window.navigator?.vibrate) window.navigator.vibrate(50);
+      }
+    }, 450);
+  };
+
+  const handlePointerMove = (e) => {
+    const dx = Math.abs(e.clientX - touchStartPos.current.x);
+    const dy = Math.abs(e.clientY - touchStartPos.current.y);
+    if ((dx > 10 || dy > 10) && pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
+  const handlePointerUpOrLeave = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
+  const handleDeleteSelected = async () => {
+    try {
+      await Promise.all(selectedNotifs.map(id => api.delete(`/notifications/${id}`)));
+      setNotifications(prev => prev.filter(n => !selectedNotifs.includes(n.notif_id)));
+      setSelectedNotifs([]);
+    } catch (error) { alert("Error deleting notifications"); }
+  };
+
+  // --- Friend Request Actions ---
   const handleAcceptRequest = async (id, e) => {
-    if(e) e.stopPropagation(); // Clickable row par bubble na hone dein
+    if(e) e.stopPropagation(); 
     try {
       await api.put(`/friends/accept/${id}`);
       setNotifications(prev => prev.filter(n => !(n.type === 'friend_request' && n.ref_id === id)));
@@ -60,20 +102,10 @@ export default function Notifications() {
     } catch (error) { alert("Error deleting request"); }
   };
 
-  const handleDeleteNotification = async (notifId, e) => {
-    if(e) e.stopPropagation();
-    try {
-      await api.delete(`/notifications/${notifId}`);
-      setNotifications(prev => prev.filter(n => n.notif_id !== notifId));
-    } catch (error) { alert("Error deleting notification"); }
-  };
-
   const handleNotificationClick = (notif) => {
-    // Navigation to the user's profile contextually
     navigate(`/user/${notif.unique_id}`, { state: { user: { unique_id: notif.unique_id, username: notif.username } } });
   };
 
-  // --- Helper Icons ---
   const renderIcon = (type) => {
     switch(type) {
       case 'post_like': return <Heart className="w-[18px] h-[18px] text-white fill-white" />;
@@ -101,16 +133,30 @@ export default function Notifications() {
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col relative transition-colors">
       
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
-        <button onClick={() => navigate(-1)} className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-          <ArrowLeft className="w-[22px] h-[22px]" />
-        </button>
-        <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Notifications</h1>
-      </div>
+      {/* UNIVERSAL SELECTION OR STANDARD HEADER */}
+      {selectedNotifs.length > 0 ? (
+        <div className="bg-chatverse text-white px-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-4 shadow-md flex justify-between items-center z-50 sticky top-0 transition-all">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setSelectedNotifs([])} className="hover:bg-white/20 p-1.5 rounded-full"><X className="w-6 h-6" /></button>
+            <span className="font-bold text-[18px]">{selectedNotifs.length}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={handleDeleteSelected} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-[22px] h-[22px]" /></button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-4 z-20 shrink-0 sticky top-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+              <ArrowLeft className="w-[22px] h-[22px]" />
+            </button>
+            <h1 className="text-[20px] font-black text-gray-900 dark:text-white tracking-tight leading-none">Notifications</h1>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto no-scrollbar pb-24 pt-2">
         {loading ? (
-          /* NAYA SKELETON LOADER FOR NOTIFICATIONS */
           <div className="flex flex-col gap-5 px-5 pt-6">
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <div key={i} className="flex items-start gap-4 animate-pulse mb-2">
@@ -132,75 +178,71 @@ export default function Notifications() {
           </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 mx-3 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 overflow-hidden mb-4">
-            {notifications.map((notif, index) => (
-              
-              <div 
-                key={index} 
-                onClick={() => handleNotificationClick(notif)}
-                className={`group flex items-start justify-between px-4 py-4 border-b border-gray-50 dark:border-gray-700/80 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer ${!notif.is_read && notif.type !== 'friend_request' ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}
-              >
-                {/* Left Side: Avatar & Content */}
-                <div className="flex items-start gap-3.5 flex-1 pr-2">
-                  {/* Avatar with Floating Icon */}
-                  <div className="relative shrink-0 mt-0.5">
-                    <div className="w-12 h-12 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full p-[2px] shadow-sm">
-                       <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center font-bold text-chatverse dark:text-indigo-400 text-[16px] uppercase">
-                         {notif.username.charAt(0)}
-                       </div>
+            {notifications.map((notif, index) => {
+              const isSelected = selectedNotifs.includes(notif.notif_id);
+              return (
+                <div 
+                  key={index} 
+                  onPointerDown={(e) => handlePointerDown(e, notif)}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUpOrLeave}
+                  onPointerLeave={handlePointerUpOrLeave}
+                  onClick={() => {
+                    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+                    if (selectedNotifs.length > 0 && notif.type !== 'friend_request') { toggleSelection(notif.notif_id); return; }
+                    handleNotificationClick(notif);
+                  }}
+                  className={`group flex items-start justify-between px-4 py-4 border-b border-gray-50 dark:border-gray-700/80 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer select-none ${isSelected ? 'bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400' : (!notif.is_read && notif.type !== 'friend_request' ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : '')}`}
+                >
+                  <div className="flex items-start gap-3.5 flex-1 pr-2 pointer-events-none">
+                    <div className="relative shrink-0 mt-0.5">
+                      <div className="w-12 h-12 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full p-[2px] shadow-sm">
+                         <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center font-bold text-chatverse dark:text-indigo-400 text-[16px] uppercase">
+                           {notif.username.charAt(0)}
+                         </div>
+                      </div>
+                      <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center shadow-md border-2 border-white dark:border-gray-800 ${renderIconColor(notif.type)}`}>
+                        {renderIcon(notif.type)}
+                      </div>
                     </div>
-                    <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center shadow-md border-2 border-white dark:border-gray-800 ${renderIconColor(notif.type)}`}>
-                      {renderIcon(notif.type)}
-                    </div>
-                  </div>
 
-                  {/* Content Body */}
-                  <div className="flex-1 flex flex-col justify-center min-h-[48px]">
-                    <p className="text-[14.5px] leading-snug text-gray-800 dark:text-gray-200">
-                      <span className="font-bold text-gray-900 dark:text-white">
-                        {notif.username}
-                      </span>
-                      
-                      {notif.type === 'post_like' && " liked your post."}
-                      {notif.type === 'comment_like' && " liked your comment."}
-                      {notif.type === 'post_comment' && " commented on your post."}
-                      {notif.type === 'mention' && " mentioned you in a comment."}
-                      {notif.type === 'new_post' && " just published a new post."}
-                      {notif.type === 'friend_request' && " sent you a friend request."}
-                    </p>
-                    
-                    {/* Snippet Context Preview */}
-                    {notif.content && notif.type !== 'new_post' && (
-                      <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1 border-l-2 border-gray-200 dark:border-gray-600 pl-2">
-                        "{notif.content}"
+                    <div className="flex-1 flex flex-col justify-center min-h-[48px]">
+                      <p className="text-[14.5px] leading-snug text-gray-800 dark:text-gray-200">
+                        <span className="font-bold text-gray-900 dark:text-white">
+                          {notif.username}
+                        </span>
+                        {notif.type === 'post_like' && " liked your post."}
+                        {notif.type === 'comment_like' && " liked your comment."}
+                        {notif.type === 'post_comment' && " commented on your post."}
+                        {notif.type === 'mention' && " mentioned you in a comment."}
+                        {notif.type === 'new_post' && " just published a new post."}
+                        {notif.type === 'friend_request' && " sent you a friend request."}
                       </p>
-                    )}
+                      
+                      {notif.content && notif.type !== 'new_post' && (
+                        <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1 border-l-2 border-gray-200 dark:border-gray-600 pl-2">
+                          "{notif.content}"
+                        </p>
+                      )}
 
-                    <p className="text-[11.5px] text-gray-400 font-bold mt-1.5">{timeAgo(notif.created_at)}</p>
+                      <p className="text-[11.5px] text-gray-400 font-bold mt-1.5">{timeAgo(notif.created_at)}</p>
+                    </div>
                   </div>
+
+                  {notif.type === 'friend_request' && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={(e) => handleAcceptRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-chatverse text-white rounded-full flex items-center justify-center hover:bg-indigo-700 hover:scale-105 transition-all shadow-md">
+                        <Check className="w-5 h-5" />
+                      </button>
+                      <button onClick={(e) => handleRejectRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-500 transition-colors">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
+                  
                 </div>
-
-                {/* Right Side: Action Buttons */}
-                {notif.type === 'friend_request' ? (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button onClick={(e) => handleAcceptRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-chatverse text-white rounded-full flex items-center justify-center hover:bg-indigo-700 hover:scale-105 transition-all shadow-md">
-                      <Check className="w-5 h-5" />
-                    </button>
-                    <button onClick={(e) => handleRejectRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-500 transition-colors">
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                ) : (
-                  <button 
-                    onClick={(e) => handleDeleteNotification(notif.notif_id, e)} 
-                    className="p-2 text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-all sm:opacity-0 sm:group-hover:opacity-100 shrink-0 self-center"
-                    title="Delete Notification"
-                  >
-                    <Trash2 className="w-[18px] h-[18px]" />
-                  </button>
-                )}
-                
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
