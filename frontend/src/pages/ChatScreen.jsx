@@ -54,8 +54,9 @@ export default function ChatScreen() {
   const swipeStartRef = useRef({ x: 0, y: 0 });
 
   const endOfMessagesRef = useRef(null);
-  const isScrolledUpRef = useRef(false); // <-- NAYA REF
-  const [newMsgBadge, setNewMsgBadge] = useState(false); // <-- NAYA STATE
+  const typingTimeoutRef = useRef(null); // <-- YE NAYI LINE ADD KARNI HAI
+  const isScrolledUpRef = useRef(false); 
+  const [newMsgBadge, setNewMsgBadge] = useState(false); 
   const pressTimer = useRef(null);
   const longPressTriggered = useRef(false);
   const [socket, setSocket] = useState(null);
@@ -66,21 +67,28 @@ export default function ChatScreen() {
   useEffect(() => {
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
-    newSocket.emit('join', currentUser.unique_id);
+    
+    // 1. ONLINE STATUS FIX: Jab socket connect ho jaye, tabhi target ka status mango
+    newSocket.on('connect', () => {
+      newSocket.emit('join', currentUser.unique_id);
+      newSocket.emit('check_companion_status', { targetId: receiverId });
+    });
 
-    // AGGRESSIVE BLUE TICK SYNC
     api.get(`/messages/${receiverId}`).then(res => {
       const fetchedMessages = res.data;
       setMessages(fetchedMessages);
 
+      // 2. INITIAL SCROLL FIX: Data aate hi exact bottom par jump karega
+      setTimeout(() => {
+        endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 100);
+
       if (!hideReadReceipts) {
         const unreadMsgs = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
-        
         if (unreadMsgs.length > 0) {
           setMessages(prev => prev.map(m => 
             (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
           ));
-
           unreadMsgs.forEach(msg => {
             newSocket.emit('mark_as_read', { messageId: msg.id, senderId: receiverId });
           });
@@ -88,51 +96,70 @@ export default function ChatScreen() {
       }
     }).catch(err => console.log(err));
 
-    // Real-time Online/Offline Status Listeners
-    newSocket.on('user_online', (uid) => {
-      if (uid === receiverId) {
-        setIsOnline(true);
+    newSocket.on('companion_status_result', (data) => {
+      if (data.targetId === receiverId) {
+        setIsOnline(data.isOnline);
+        if (data.lastSeen) setLastSeenTime(data.lastSeen);
       }
+    });
+
+    newSocket.on('user_online', (uid) => {
+      if (uid === receiverId) setIsOnline(true);
     });
 
     newSocket.on('user_offline', (data) => {
       const uid = typeof data === 'string' ? data : data?.userId;
       if (uid === receiverId) {
         setIsOnline(false);
-        setLastSeenTime(new Date().toISOString());
+        setLastSeenTime(data?.lastSeen || new Date().toISOString());
       }
     });
 
     newSocket.on('receive_message', (newMsg) => {
       if (newMsg.sender_id === receiverId) {
+        
+        // Message aate hi typing indicator instant hata do
+        setIsTyping(false);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
         const readMsg = { ...newMsg, status: 'read' };
         setMessages((prev) => [...prev, readMsg]);
         setIsOnline(true);
         
-        // ... (Tumhara sound wala logic yaha rahega) ...
+        if (!isMuted) {
+          try {
+            const tone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
+            let audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav';
+            if (tone === 'minimal') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2354/2354-84.wav';
+            if (tone === 'retro') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-84.wav';
+            const audio = new Audio(audioSrc);
+            audio.volume = 0.4;
+            audio.play();
+          } catch(e){}
+        }
 
         if (!hideReadReceipts) {
           newSocket.emit('mark_as_read', { messageId: newMsg.id, senderId: receiverId });
         }
 
-        // SMART SCROLL LOGIC
         if (!isScrolledUpRef.current) {
           setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         } else {
-          setNewMsgBadge(true); // Agar user upar hai toh bas Red Dot dikhao
+          setNewMsgBadge(true); 
         }
       }
     });
-    
-    // Typing indicator wale event me bhi same karo:
+
+    // 3. TYPING ANIMATION FIX: Purane 2 duplicate listeners hata kar ye ek accurate listener lagaya hai
     newSocket.on('typing', (senderId) => {
       if (senderId === receiverId) {
         setIsTyping(true);
         if (!isScrolledUpRef.current) {
           setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         }
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => setIsTyping(false), 2000);
+        
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 2000);
       }
     });
 
@@ -149,16 +176,10 @@ export default function ChatScreen() {
       localStorage.setItem(`cv_theme_${receiverId}`, themeId);
     });
 
-    let typingTimeout;
-    newSocket.on('typing', (senderId) => {
-      if (senderId === receiverId) {
-        setIsTyping(true);
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => setIsTyping(false), 2000);
-      }
-    });
-
-    return () => newSocket.disconnect();
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      newSocket.disconnect();
+    }
   }, [receiverId, currentUser.unique_id, hideReadReceipts, isMuted]);
 
   const formatTime = (dateString) => {
@@ -171,6 +192,22 @@ export default function ChatScreen() {
       minute: '2-digit', 
       hour12: true
     });
+  };
+
+  const formatLastSeen = (dateString) => {
+    if (!dateString) return 'recently';
+    const safeDateString = dateString.endsWith('Z') ? dateString : `${dateString}Z`;
+    const date = new Date(safeDateString);
+    const now = new Date();
+    
+    const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    const isYesterday = new Date(now.setDate(now.getDate() - 1)).getDate() === date.getDate() && now.getMonth() === date.getMonth();
+
+    const time = date.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+    
+    if (isToday) return `today at ${time}`;
+    if (isYesterday) return `yesterday at ${time}`;
+    return `${date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} at ${time}`;
   };
 
   // SMART SCROLL TO BOTTOM
@@ -241,13 +278,12 @@ export default function ChatScreen() {
     if (socket) {
       socket.emit('send_message', { tempId, senderId: currentUser.unique_id, receiverId, content: newMsg.content, replyToId: replyIdToSend });
     }
-  };
 
-  const toggleSelection = (msg) => {
-    if (msg.is_deleted_for_everyone) return;
-    setSelectedMessages(prev => 
-      prev.some(m => m.id === msg.id) ? prev.filter(m => m.id !== msg.id) : [...prev, msg]
-    );
+    // FIX YAHAN HAI: Message send karte hi turant screen ko bottom par scroll kar do
+    setTimeout(() => {
+      endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+      isScrolledUpRef.current = false; // System ko bata do ki ab hum bottom par aa chuke hain
+    }, 50);
   };
 
   const handlePointerDown = (e, msg) => {
@@ -286,6 +322,8 @@ export default function ChatScreen() {
       if (swipeOffset >= 45) { 
         setReplyingTo(msg);
         if (window.navigator?.vibrate) window.navigator.vibrate(50);
+        // FIX: Automatically focus the text box like WhatsApp
+        setTimeout(() => document.getElementById('chat-input')?.focus(), 50);
       }
       setSwipingId(null);
       setSwipeOffset(0);
@@ -387,7 +425,16 @@ export default function ChatScreen() {
           </div>
           <div className="flex items-center gap-3">
             {selectedMessages.length === 1 && (
-              <button onClick={() => { setReplyingTo(selectedMessages[0]); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Reply className="w-5 h-5" /></button>
+              <button 
+                onClick={() => { 
+                  setReplyingTo(selectedMessages[0]); 
+                  setSelectedMessages([]); 
+                  setTimeout(() => document.getElementById('chat-input')?.focus(), 50); // Focus Keyboard
+                }} 
+                className="p-2 hover:bg-white/20 rounded-full"
+              >
+                <Reply className="w-5 h-5" />
+              </button>
             )}
             <button onClick={handleStarMessages} className="p-2 hover:bg-white/20 rounded-full"><Star className="w-5 h-5" /></button>
             <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
@@ -415,14 +462,13 @@ export default function ChatScreen() {
                   <span className="text-[11px] text-[#4ADE80] font-bold">Online</span>
                 ) : (
                   <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
-                    {lastSeenTime ? `Last seen ${formatTime(lastSeenTime)}` : 'Last seen recently'}
+                    {lastSeenTime ? `Last seen ${formatLastSeen(lastSeenTime)}` : 'Last seen recently'}
                   </span>
                 )}
               </div>
             </div>
           </div>
           <div className="relative">
-            {/* FIX: Exclusive Open Logic for Top Menu */}
             <button onClick={(e) => { 
                 e.stopPropagation(); 
                 setShowMenu(!showMenu); 
@@ -509,8 +555,7 @@ export default function ChatScreen() {
               <div className={`flex w-full ${marginClass} group ${isMe ? 'justify-end' : 'justify-start'}`}>
                 
                 {isMe && !msg.is_deleted_for_everyone && (
-                  <div className="flex items-center gap-1 pr-2 opacity-0 group-hover:opacity-100 transition-opacity self-center">
-                    {/* FIX: Exclusive Open Logic for Inline Reaction */}
+                  <div className={`flex items-center gap-1 px-2 transition-opacity self-center ${swipingId === msg.id ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
                     <button onClick={(e) => { 
                         e.stopPropagation(); 
                         setActiveReactId(activeReactId === msg.id ? null : msg.id); 
@@ -546,7 +591,7 @@ export default function ChatScreen() {
                       onPointerMove={(e) => { e.stopPropagation(); handlePointerMove(e, msg); }}
                       onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(e, msg); }}
                       onPointerLeave={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
-                      className={`message-bubble relative px-2.5 pt-1.5 pb-1 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
+                      className={`message-bubble relative px-3 pt-2 pb-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
                         isSelected ? `bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 ${radiusClasses}` :
                         msg.is_deleted_for_everyone ? `bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 ${radiusClasses}` 
                         : isMe ? `bg-chatverse text-white ${radiusClasses}` 
@@ -554,7 +599,7 @@ export default function ChatScreen() {
                       }`}
                     >
                       
-                      {/* Replied Message Styling and Scroll Action */}
+                      {/* Replied Message Styling */}
                       {msg.reply_content && !msg.is_deleted_for_everyone && (
                         <div 
                           onClick={(e) => { e.stopPropagation(); scrollToMessage(msg.reply_to_id); }}
@@ -566,8 +611,9 @@ export default function ChatScreen() {
                       
                       <div className="relative text-[15.5px] leading-[1.4] break-words">
                         <span>{msg.content}</span>
+                        {/* FIX: Improved invisible spacer width to completely avoid overlapping timestamps with text */}
                         {!msg.is_deleted_for_everyone && (
-                          <span className={`inline-block h-[12px] ${isMe ? 'w-[75px]' : 'w-[52px]'}`}></span>
+                          <span className={`inline-block h-[14px] ${isMe ? 'w-[85px]' : 'w-[60px]'}`}></span>
                         )}
                       </div>
 
@@ -587,8 +633,9 @@ export default function ChatScreen() {
                       )}
                     </div>
 
+                    {/* FIX: Perfected absolute coordinates so the reaction badge never hides the timestamp */}
                     {msg.reaction && !msg.is_deleted_for_everyone && (
-                      <div className={`absolute -bottom-3.5 ${isMe ? 'right-4' : 'left-4'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-30 select-none flex items-center justify-center`}>
+                      <div className={`absolute -bottom-[14px] ${isMe ? 'right-2' : 'left-2'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-30 select-none flex items-center justify-center`}>
                         {msg.reaction}
                       </div>
                     )}
@@ -615,8 +662,7 @@ export default function ChatScreen() {
                 </div>
 
                 {!isMe && !msg.is_deleted_for_everyone && (
-                  <div className="flex items-center gap-1 pl-2 opacity-0 group-hover:opacity-100 transition-opacity self-center">
-                    {/* FIX: Exclusive Open Logic for Inline Reaction */}
+                  <div className={`flex items-center gap-1 px-2 transition-opacity self-center ${swipingId === msg.id ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
                     <button onClick={(e) => { 
                         e.stopPropagation(); 
                         setActiveReactId(activeReactId === msg.id ? null : msg.id); 
@@ -690,7 +736,6 @@ export default function ChatScreen() {
         )}
 
         <div className="px-3 py-3 flex items-end gap-2 z-10 bg-white dark:bg-gray-800">
-          {/* FIX: Exclusive Open Logic for Bottom Emoji Picker */}
           <button 
             onClick={(e) => { 
               e.stopPropagation(); 
