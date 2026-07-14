@@ -36,6 +36,9 @@ const initializeDatabase = async () => {
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;`);
     // Purani CREATE queries ke just baad ye add karo:
     await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by TEXT[] DEFAULT '{}';`);
+    // initializeDatabase() function ke andar ye line add karo:
+    await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`);
+    
     console.log("✅ Database Tables Auto-Synced! Verified Column Active.");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
@@ -399,7 +402,35 @@ const io = new Server(server, { cors: { origin: ["http://localhost:5173", "http:
 const onlineUsers = new Map();
 
 io.on('connection', (socket) => {
-  socket.on('join', (userId) => { if(userId) { onlineUsers.set(userId, socket.id); socket.userId = userId; io.emit('user_online', userId); } });
+  socket.on('join', async (userId) => {
+    if (userId) {
+      onlineUsers.set(userId, socket.id);
+      socket.userId = userId;
+      
+      // pure app me broadcast karo ki ye user online aa chuka hai
+      io.emit('user_online', userId);
+
+      try {
+        // AUTOMATIC TICK CONVERSION (Sent -> Delivered)
+        // Jab ye user online aaya, to isko aaye hue saare 'sent' messages ko 'delivered' mark kar do
+        const undelivered = await db.query(
+          `UPDATE messages SET status = 'delivered' WHERE receiver_id = $1 AND status = 'sent' RETURNING id, sender_id`,
+          [userId]
+        );
+
+        // Har ek sender ko notify karo ki unka message delivered ho gaya hai (Double grey ticks)
+        undelivered.rows.forEach(msg => {
+          const senderSocketId = onlineUsers.get(msg.sender_id);
+          if (senderSocketId) {
+            io.to(senderSocketId).emit('message_updated', { id: msg.id, status: 'delivered' });
+          }
+        });
+      } catch (err) {
+        console.error("Error updating delivery status on join:", err);
+      }
+    }
+  });
+
   socket.on('typing', ({ senderId, receiverId }) => { const s = onlineUsers.get(receiverId); if(s) io.to(s).emit('typing', senderId); });
   
   socket.on('sync_messages', async (userId) => {
@@ -474,7 +505,29 @@ io.on('connection', (socket) => {
   socket.on('mark_as_read', async ({ messageId, senderId }) => {
     try { await db.query(`UPDATE messages SET status = 'read' WHERE id = $1`, [messageId]); if(onlineUsers.get(senderId)) io.to(onlineUsers.get(senderId)).emit('message_updated', { id: messageId, status: 'read' }); } catch (err) {}
   });
-  socket.on('disconnect', async () => { if (socket.userId) { onlineUsers.delete(socket.userId); io.emit('user_offline', { userId: socket.userId }); } });
+
+  socket.on('check_companion_status', async ({ targetId }) => {
+    const isTargetOnline = onlineUsers.has(targetId);
+    let lastSeen = null;
+    if (!isTargetOnline) {
+      try {
+        const res = await db.query(`SELECT last_seen FROM users WHERE unique_id = $1`, [targetId]);
+        if (res.rows.length > 0) lastSeen = res.rows[0].last_seen;
+      } catch (err) {}
+    }
+    socket.emit('companion_status_result', { targetId, isOnline: isTargetOnline, lastSeen });
+  });
+  
+  socket.on('disconnect', async () => { 
+    if (socket.userId) { 
+      onlineUsers.delete(socket.userId); 
+      // User offline jaate hi uski last_seen update kar do
+      try {
+        await db.query(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE unique_id = $1`, [socket.userId]);
+      } catch(err) {}
+      io.emit('user_offline', { userId: socket.userId, lastSeen: new Date().toISOString() }); 
+    } 
+  });
 });
 
 server.listen(process.env.PORT || 5000, () => console.log(`🚀 ChatVerse Backend Running!`));
