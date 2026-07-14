@@ -218,12 +218,12 @@ export const PostItem = ({ post, onPostUpdate, onPostDelete, isModal = false, on
   };
 
   return (
-    <div className={`bg-white dark:bg-gray-800 transition-all ${isModal ? 'w-full rounded-[24px] shadow-2xl border border-gray-100 dark:border-gray-700 relative' : 'mb-5 mx-4 p-5 rounded-[24px] shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] dark:shadow-none border border-gray-50 dark:border-gray-700'}`}>
+    <div className={`bg-white dark:bg-gray-800 transition-all ${isModal ? 'w-full rounded-[24px] shadow-2xl border border-gray-100 dark:border-gray-700 relative' : 'mb-3 mx-3 p-4 rounded-[20px] shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] dark:shadow-none border border-gray-50 dark:border-gray-700'}`}>
       
       {/* HEADER */}
       <div className={`flex justify-between items-center ${isModal ? 'px-5 py-4 border-b border-gray-50 dark:border-gray-700/60' : 'mb-4'}`}>
         <div onClick={() => handleProfileClick(post.unique_id, post.username)} className="flex items-center gap-3.5 cursor-pointer hover:opacity-80 transition-opacity">
-          <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full p-[2px] shadow-sm">
+          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full p-[2px] shadow-sm">
             <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-gray-900 dark:text-white font-bold text-[15px] uppercase">
               {post.username?.charAt(0) || 'U'}
             </div>
@@ -239,27 +239,53 @@ export const PostItem = ({ post, onPostUpdate, onPostDelete, isModal = false, on
         
         {/* MENU */}
         <div className="relative flex items-center gap-1">
-          <button onClick={() => setShowMenu(!showMenu)} className="text-gray-400 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+          {/* 3-Dot Button */}
+          <button 
+            onClick={() => setShowMenu(!showMenu)} 
+            className="text-gray-400 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors relative z-[60]"
+          >
             <MoreVertical className="w-5 h-5" />
           </button>
           
           {onClose && (
-            <button onClick={onClose} className="p-1.5 ml-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full text-gray-600 dark:text-gray-300 transition-colors">
+            <button onClick={onClose} className="p-1.5 ml-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full text-gray-600 dark:text-gray-300 transition-colors relative z-[60]">
               <X className="w-5 h-5"/>
             </button>
           )}
 
+          {/* FIX: INVISIBLE OVERLAY TO CLOSE MENU WHEN CLICKING OUTSIDE */}
           {showMenu && (
-            <div className="absolute right-0 top-10 w-44 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-20 animate-slide-up">
-              <button onClick={handleCopy} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-700 dark:text-gray-200 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 font-bold transition-colors">
+            <div 
+              className="fixed inset-0 z-[50]" 
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                setShowMenu(false); 
+              }}
+            ></div>
+          )}
+
+          {/* DROPDOWN MENU */}
+          {showMenu && (
+            <div className="absolute right-0 top-10 w-44 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[60] animate-slide-up">
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleCopy(); }} 
+                className="w-full text-left px-4 py-3.5 text-[14px] text-gray-700 dark:text-gray-200 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 font-bold transition-colors"
+              >
                 <Copy className="w-[18px] h-[18px]"/> Copy Text
               </button>
+              
               {isMyPost && (
                 <>
-                  <button onClick={() => {setIsEditing(true); setShowMenu(false);}} className="w-full text-left px-4 py-3.5 text-[14px] text-indigo-600 dark:text-indigo-400 flex items-center gap-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setIsEditing(true); setShowMenu(false); }} 
+                    className="w-full text-left px-4 py-3.5 text-[14px] text-indigo-600 dark:text-indigo-400 flex items-center gap-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700"
+                  >
                     <Edit3 className="w-[18px] h-[18px]"/> Edit Post
                   </button>
-                  <button onClick={handleDeletePost} className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-2.5 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} 
+                    className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-2.5 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700"
+                  >
                     <Trash2 className="w-[18px] h-[18px]"/> Delete Post
                   </button>
                 </>
@@ -288,7 +314,7 @@ export const PostItem = ({ post, onPostUpdate, onPostDelete, isModal = false, on
       </div>
       
       {/* INTERACTION BAR */}
-      <div className={`flex items-center gap-6 ${isModal ? 'px-5 py-4 border-t border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/50' : 'mt-4 pt-4 border-t border-gray-100 dark:border-gray-700/60'}`}>
+      <div className={`flex items-center gap-6 ${isModal ? 'px-5 py-4 border-t border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/50' : 'mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/60'}`}>
         <div className="flex items-center gap-2">
           <button 
             onClick={() => {
@@ -323,7 +349,7 @@ export const PostItem = ({ post, onPostUpdate, onPostDelete, isModal = false, on
               : likedUsers.length === 0 ? <div className="py-8 text-center text-[14px] font-medium text-gray-500">No likes yet.</div> 
               : likedUsers.map(u => (
                 <div key={u.unique_id} onClick={() => handleProfileClick(u.unique_id, u.username)} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-2xl cursor-pointer transition-colors">
-                  <div className="w-11 h-11 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">{u.username.charAt(0)}</div>
+                  <div className="text-[14px] bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">{u.username.charAt(0)}</div>
                   <div className="flex-1">
                     <p className="font-bold text-gray-900 dark:text-white text-[15px] flex items-center gap-1">
                       {u.username}
@@ -412,8 +438,8 @@ export default function HomeFeed() {
 
   return (
     <div className="h-full w-full bg-[#F4F6F8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+24px)] pb-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
-        <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Feed</h1>
+      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-3 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
+        <h1 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">Feed</h1>
         <div className="flex items-center gap-3">
           <div className="w-[42px] h-[42px] bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0 uppercase shadow-md">
             {currentUser.username?.charAt(0) || 'U'}

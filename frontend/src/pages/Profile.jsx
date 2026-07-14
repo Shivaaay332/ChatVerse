@@ -75,54 +75,54 @@ export default function Profile() {
 
       <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
         
-        <div className="bg-white dark:bg-gray-800 pt-8 pb-8 px-6 shadow-sm flex flex-col items-center relative z-10 border-b border-gray-100 dark:border-gray-700 rounded-b-[32px]">
+        {/* COMPACT PROFILE BANNER START */}
+        <div className="bg-white dark:bg-gray-800 pt-5 pb-5 px-5 shadow-sm flex flex-col items-center relative z-10 border-b border-gray-100 dark:border-gray-700 rounded-b-[24px]">
           <div className="relative">
-            <div className="w-28 h-28 bg-gradient-to-tr from-chatverse via-purple-500 to-pink-500 rounded-full p-[3px] shadow-lg shadow-indigo-200 dark:shadow-none">
-              <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center uppercase border-[3px] border-white dark:border-gray-800">
-                <span className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-chatverse to-purple-500">
+            {/* Avatar size reduced from w-28 h-28 to w-20 h-20 */}
+            <div className="w-20 h-20 bg-gradient-to-tr from-chatverse via-purple-500 to-pink-500 rounded-full p-[3px] shadow-sm">
+              <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center uppercase border-[2px] border-white dark:border-gray-800">
+                <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-chatverse to-purple-500">
                   {userProfile.username?.charAt(0) || '?'}
                 </span>
               </div>
             </div>
           </div>
           
-          <div className="text-center mt-4">
-            <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">{userProfile.username}</h2>
-            <p className="text-[14px] text-chatverse dark:text-indigo-400 font-bold mt-0.5">@{userProfile.unique_id}</p>
+          <div className="text-center mt-3">
+            {/* Name size reduced from text-2xl to text-xl */}
+            <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">{userProfile.username}</h2>
+            <p className="text-[13px] text-chatverse dark:text-indigo-400 font-bold mt-0.5">@{userProfile.unique_id}</p>
           </div>
 
-          <div className="mt-4 w-full flex flex-col items-center">
+          <div className="mt-3 w-full flex flex-col items-center">
             {isEditingBio ? (
-              <div className="w-full max-w-[280px] flex items-center gap-2 bg-gray-50 dark:bg-gray-700 p-1.5 rounded-xl border border-gray-200 dark:border-gray-600 shadow-inner">
+              <div className="w-full max-w-[260px] flex items-center gap-2 bg-gray-50 dark:bg-gray-700 p-1 rounded-xl border border-gray-200 dark:border-gray-600 shadow-inner">
                 <input 
                   type="text" value={bioText} onChange={(e) => setBioText(e.target.value)} 
-                  className="flex-1 bg-transparent dark:text-white text-[14px] focus:outline-none text-center font-medium pl-2" autoFocus maxLength={50} 
+                  className="flex-1 bg-transparent dark:text-white text-[13px] focus:outline-none text-center font-medium pl-2" autoFocus maxLength={50} 
                 />
-                <button onClick={handleSaveBio} className="p-1.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"><Check className="w-4 h-4"/></button>
-                <button onClick={() => {setIsEditingBio(false); setBioText(userProfile.bio || "");}} className="p-1.5 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"><X className="w-4 h-4"/></button>
+                <button onClick={handleSaveBio} className="p-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"><Check className="w-3.5 h-3.5"/></button>
+                <button onClick={() => {setIsEditingBio(false); setBioText(userProfile.bio || "");}} className="p-1 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"><X className="w-3.5 h-3.5"/></button>
               </div>
             ) : (
               <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingBio(true)}>
-                <p className="text-[14.5px] text-gray-600 dark:text-gray-300 font-medium whitespace-pre-wrap text-center max-w-[280px] leading-relaxed">
+                <p className="text-[13px] text-gray-600 dark:text-gray-300 font-medium whitespace-pre-wrap text-center max-w-[260px] leading-snug">
                   {userProfile.bio || "Add a bio to your profile ✨"}
                 </p>
-                <Edit3 className="w-[14px] h-[14px] text-gray-300 dark:text-gray-500 group-hover:text-chatverse transition-colors" />
+                <Edit3 className="w-[12px] h-[12px] text-gray-300 dark:text-gray-500 group-hover:text-chatverse transition-colors" />
               </div>
             )}
           </div>
           
-          <div className="flex w-full max-w-[300px] justify-between mt-8 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+          <div className="flex w-full max-w-[260px] justify-between mt-5 bg-gray-50 dark:bg-gray-700/50 p-3 rounded-[16px] border border-gray-100 dark:border-gray-700 shadow-sm">
             <div className="flex flex-col items-center w-1/2">
-              <span className="font-black text-2xl text-gray-900 dark:text-white">{myPosts.length}</span>
-              <span className="text-[11px] text-gray-400 dark:text-gray-400 uppercase tracking-wider font-bold mt-0.5">Posts</span>
+              <span className="font-black text-xl text-gray-900 dark:text-white">{myPosts.length}</span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-400 uppercase tracking-wider font-bold mt-0.5">Posts</span>
             </div>
-            <div className="w-[2px] h-10 bg-gray-200 dark:bg-gray-600 self-center rounded-full"></div>
-            <div 
-              onClick={handleOpenFriends}
-              className="flex flex-col items-center w-1/2 cursor-pointer hover:opacity-70 transition-opacity"
-            >
-              <span className="font-black text-2xl text-gray-900 dark:text-white">{friendCount}</span>
-              <span className="text-[11px] text-gray-400 dark:text-gray-400 uppercase tracking-wider font-bold mt-0.5">Friends</span>
+            <div className="w-[1px] h-8 bg-gray-200 dark:bg-gray-600 self-center rounded-full"></div>
+            <div onClick={handleOpenFriends} className="flex flex-col items-center w-1/2 cursor-pointer hover:opacity-70 transition-opacity">
+              <span className="font-black text-xl text-gray-900 dark:text-white">{friendCount}</span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-400 uppercase tracking-wider font-bold mt-0.5">Friends</span>
             </div>
           </div>
         </div>
