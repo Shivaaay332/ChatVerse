@@ -26,7 +26,8 @@ export default function ChatScreen() {
   const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showSoundModal, setShowSoundModal] = useState(false);
-
+  // 👇 NAYI LINE YAHAN ADD KARO 👇
+  const [previewChatTone, setPreviewChatTone] = useState('');
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [showMenu, setShowMenu] = useState(false);
@@ -507,7 +508,14 @@ export default function ChatScreen() {
                 <button onClick={() => { setShowMenu(false); setShowThemeModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
                   <Palette className="w-4 h-4 text-chatverse" /> Chat Theme
                 </button>
-                <button onClick={() => { setShowMenu(false); setShowSoundModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
+                <button 
+                  onClick={() => { 
+                    setPreviewChatTone(localStorage.getItem(`cv_sound_${receiverId}`) || 'default');
+                    setShowMenu(false); 
+                    setShowSoundModal(true); 
+                  }} 
+                  className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50"
+                >
                   <Music className="w-4 h-4 text-indigo-400" /> Chat Tone
                 </button>
                 
@@ -822,34 +830,60 @@ export default function ChatScreen() {
 
       {showSoundModal && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowSoundModal(false)}>
-          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-[24px] p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4 flex items-center gap-2">
               <Music className="w-5 h-5 text-indigo-400" /> Chat Tone
             </h3>
-            <div className="flex flex-col gap-2">
+            
+            <div className="flex flex-col gap-2 max-h-[50vh] overflow-y-auto no-scrollbar pb-2 px-1">
               {[
                 { id: 'default', name: 'Default (Settings)' },
                 { id: 'ringtone1', name: 'Tone 1' },
                 { id: 'ringtone2', name: 'Tone 2' },
                 { id: 'ringtone3', name: 'Tone 3' },
                 { id: 'ringtone4', name: 'Tone 4' },
-                { id: 'ringtone5', name: 'Tone 5' }
+                { id: 'ringtone5', name: 'Tone 5' },
+                { id: 'ringtone6', name: 'Tone 6' },
+                { id: 'ringtone7', name: 'Tone 7' },
+                { id: 'ringtone8', name: 'Tone 8' }
               ].map(tone => {
-                const currentTone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
                 return (
                   <button 
                     key={tone.id} 
-                    onClick={() => testAndSetSound(tone.id)}
-                    className={`flex items-center justify-between p-3.5 rounded-2xl transition-colors ${currentTone === tone.id ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                    onClick={() => {
+                      setPreviewChatTone(tone.id);
+                      try {
+                        const toneToPlay = tone.id === 'default' ? (localStorage.getItem('chatverse_default_tone') || 'ringtone1') : tone.id;
+                        const audio = new Audio(`/sounds/${toneToPlay}.mp3`);
+                        audio.volume = 0.5;
+                        audio.play();
+                      } catch(e) {}
+                    }}
+                    className={`flex items-center justify-between p-3.5 rounded-2xl transition-all ${previewChatTone === tone.id ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                   >
                     <span className="font-bold text-[14.5px] text-gray-800 dark:text-gray-100">{tone.name}</span>
-                    {currentTone === tone.id && <Check className="w-5 h-5 text-chatverse" />}
+                    
+                    <div className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center transition-colors ${previewChatTone === tone.id ? 'border-chatverse' : 'border-gray-300 dark:border-gray-500'}`}>
+                      {previewChatTone === tone.id && <div className="w-[10px] h-[10px] bg-chatverse rounded-full" />}
+                    </div>
                   </button>
                 )
               })}
             </div>
-            <p className="text-center text-[12px] text-gray-400 mt-3 px-2">Tap a tone to hear a preview.</p>
-            <button onClick={() => setShowSoundModal(false)} className="mt-2 w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 rounded-xl">Done</button>
+            
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setShowSoundModal(false)} className="flex-1 bg-gray-100 dark:bg-gray-700 font-bold py-3.5 rounded-xl text-gray-800 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Cancel</button>
+              <button 
+                onClick={() => {
+                  localStorage.setItem(`cv_sound_${receiverId}`, previewChatTone);
+                  setShowSoundModal(false);
+                }} 
+                className="flex-1 bg-chatverse text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
+              >
+                Save
+              </button>
+            </div>
+
           </div>
         </div>
       )}

@@ -23,6 +23,7 @@ export default function Settings() {
 
   const [showToneModal, setShowToneModal] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(Notification.permission === 'granted');
+  const [previewTone, setPreviewTone] = useState(''); // NEW STATE FOR PREVIEW
   const [showPinModal, setShowPinModal] = useState(false);
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -62,7 +63,6 @@ export default function Settings() {
     const newValue = !hideLastSeen;
     setHideLastSeen(newValue);
     localStorage.setItem('chatverse_hide_lastseen', newValue);
-    // FIX: Backend ko inform karo ki privacy update ho gayi hai
     try { 
       await api.put('/users/me/privacy', { hideLastSeen: newValue }); 
     } catch(err) { console.error(err); }
@@ -233,7 +233,6 @@ export default function Settings() {
             <ToggleSwitch isOn={hideLastSeen} onToggle={handleLastSeen} />
           </div>
 
-          {/* 👇 NAYA BUTTON YAHAN ADD KARNA HAI 👇 */}
           <div className="flex items-center justify-between py-2 mb-3">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-indigo-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-indigo-500 dark:text-indigo-400">
@@ -268,7 +267,6 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* FIX: NOTIFICATION & SOUND SETTINGS */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-50 dark:border-gray-700 transition-colors">
           <h2 className="text-[12px] font-black text-gray-400 dark:text-gray-500 tracking-widest uppercase mb-4 pl-1">Notifications & Sound</h2>
           
@@ -295,10 +293,16 @@ export default function Settings() {
             </button>
           </div>
 
-          <div onClick={() => setShowToneModal(true)} className="flex items-center justify-between py-2 cursor-pointer group">
+          <div 
+            onClick={() => { 
+              setPreviewTone(localStorage.getItem('chatverse_default_tone') || 'ringtone1');
+              setShowToneModal(true); 
+            }} 
+            className="flex items-center justify-between py-2 cursor-pointer group"
+          >
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-indigo-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-indigo-500">
-                <CaseUpper className="w-5 h-5" /> {/* Note: Replace icon with Bell if you imported it */}
+                <CaseUpper className="w-5 h-5" />
               </div>
               <div className="flex flex-col">
                 <span className="font-bold text-gray-900 dark:text-white text-[15px]">Default Tone</span>
@@ -368,31 +372,49 @@ export default function Settings() {
         </div>
       )}
 
+      {/* WHATSAPP STYLE DEFAULT TONE MODAL */}
       {showToneModal && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowToneModal(false)}>
-          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-[24px] p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4">Set Default Tone</h3>
-            <div className="flex flex-col gap-2">
-              {[1, 2, 3, 4, 5].map(num => {
+            
+            {/* Scrollable List for 8 Tones */}
+            <div className="flex flex-col gap-2 max-h-[50vh] overflow-y-auto no-scrollbar pb-2 px-1">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map(num => {
                 const toneId = `ringtone${num}`;
-                const currentTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
                 return (
                   <button 
                     key={toneId} 
                     onClick={() => {
-                      new Audio(`/sounds/${toneId}.mp3`).play().catch(()=>{});
-                      localStorage.setItem('chatverse_default_tone', toneId);
-                      setShowToneModal(false);
+                      setPreviewTone(toneId); 
+                      new Audio(`/sounds/${toneId}.mp3`).play().catch(()=>{}); 
                     }}
-                    className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${currentTone === toneId ? 'bg-indigo-50 border border-indigo-100 dark:bg-indigo-900/30' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100'}`}
+                    className={`flex items-center justify-between p-3.5 rounded-2xl transition-all ${previewTone === toneId ? 'bg-indigo-50 border border-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                   >
-                    <span className="font-bold text-[15px] text-gray-800 dark:text-gray-100">Tone {num}</span>
-                    {currentTone === toneId && <Check className="w-5 h-5 text-chatverse" />}
+                    <span className="font-bold text-[14.5px] text-gray-800 dark:text-gray-100">Tone {num}</span>
+                    
+                    {/* WhatsApp Style Radio Circle */}
+                    <div className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center transition-colors ${previewTone === toneId ? 'border-chatverse' : 'border-gray-300 dark:border-gray-500'}`}>
+                      {previewTone === toneId && <div className="w-[10px] h-[10px] bg-chatverse rounded-full" />}
+                    </div>
                   </button>
                 )
               })}
             </div>
-            <button onClick={() => setShowToneModal(false)} className="mt-4 w-full bg-gray-100 dark:bg-gray-700 font-bold py-3 rounded-xl dark:text-white">Cancel</button>
+
+            {/* Save & Cancel Buttons */}
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setShowToneModal(false)} className="flex-1 bg-gray-100 dark:bg-gray-700 font-bold py-3.5 rounded-xl text-gray-800 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Cancel</button>
+              <button 
+                onClick={() => {
+                  localStorage.setItem('chatverse_default_tone', previewTone); 
+                  setShowToneModal(false);
+                }} 
+                className="flex-1 bg-chatverse text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
       )}
