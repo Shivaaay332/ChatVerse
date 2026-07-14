@@ -203,6 +203,11 @@ export default function ChatScreen() {
 
   const handleTyping = (e) => {
     setMessage(e.target.value);
+    
+    // Auto-Resize Textarea Logic
+    e.target.style.height = 'auto';
+    e.target.style.height = `${e.target.scrollHeight}px`;
+
     if (socket && !hasCustomPrivacy) {
       socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
     }
@@ -220,6 +225,9 @@ export default function ChatScreen() {
     setMessages((prev) => [...prev, newMsg]);
     setMessage('');
     setShowEmojiPicker(false);
+
+    const textarea = document.getElementById('chat-input');
+    if (textarea) textarea.style.height = 'auto';
     
     const replyIdToSend = replyingTo ? replyingTo.id : null;
     setReplyingTo(null);
@@ -684,10 +692,10 @@ export default function ChatScreen() {
           </button>
 
           <textarea 
+            id="chat-input"
             value={message} onChange={handleTyping} placeholder="Message..." 
-            className="flex-1 max-h-28 bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400" 
+            className="flex-1 max-h-28 overflow-y-auto no-scrollbar bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400 shadow-sm" 
             rows="1" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
-            onFocus={() => { setShowEmojiPicker(false); setActiveReactId(null); setShowMenu(false); }}
           />
           <button 
             onClick={() => {
