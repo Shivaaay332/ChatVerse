@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Sun, Moon, Lock, EyeOff, LogOut, UserX, ChevronRight, Shield, Delete, X, AlertTriangle, CaseUpper, BadgeCheck } from 'lucide-react';
+import { ArrowLeft, Sun, Moon, Lock, EyeOff, LogOut, UserX, ChevronRight, Shield, Delete, X, AlertTriangle, CaseUpper, BadgeCheck, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
@@ -21,6 +21,8 @@ export default function Settings() {
   const [hideReadReceipts, setHideReadReceipts] = useState(localStorage.getItem('chatverse_hide_readreceipts') === 'true');
   const [fontSizeIndex, setFontSizeIndex] = useState(parseInt(localStorage.getItem('chatverse_fontsize') || '1'));
 
+  const [showToneModal, setShowToneModal] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(Notification.permission === 'granted');
   const [showPinModal, setShowPinModal] = useState(false);
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -266,6 +268,49 @@ export default function Settings() {
           </div>
         </div>
 
+        {/* FIX: NOTIFICATION & SOUND SETTINGS */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-50 dark:border-gray-700 transition-colors">
+          <h2 className="text-[12px] font-black text-gray-400 dark:text-gray-500 tracking-widest uppercase mb-4 pl-1">Notifications & Sound</h2>
+          
+          <div className="flex items-center justify-between py-2 mb-3">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-yellow-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-yellow-500">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-gray-900 dark:text-white text-[15px]">Push Popups</span>
+                <span className="text-[12px] text-gray-500">Show message popups on screen</span>
+              </div>
+            </div>
+            <button 
+              onClick={() => {
+                Notification.requestPermission().then(perm => {
+                  setPushEnabled(perm === 'granted');
+                  if(perm === 'granted') alert("Popups enabled!");
+                });
+              }}
+              className={`px-3 py-1.5 rounded-lg text-[12px] font-bold ${pushEnabled ? 'bg-green-100 text-green-600' : 'bg-chatverse text-white'}`}
+            >
+              {pushEnabled ? 'Enabled' : 'Allow'}
+            </button>
+          </div>
+
+          <div onClick={() => setShowToneModal(true)} className="flex items-center justify-between py-2 cursor-pointer group">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-indigo-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-indigo-500">
+                <CaseUpper className="w-5 h-5" /> {/* Note: Replace icon with Bell if you imported it */}
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-gray-900 dark:text-white text-[15px]">Default Tone</span>
+                <span className="text-[12px] text-gray-500 capitalize">
+                   {(localStorage.getItem('chatverse_default_tone') || 'ringtone1').replace('ringtone', 'Tone ')}
+                </span>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
+          </div>
+        </div>
+
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-50 dark:border-gray-700 transition-colors">
            <h2 className="text-[12px] font-black text-gray-400 dark:text-gray-500 tracking-widest uppercase mb-2 pl-1">Danger Zone</h2>
            <div onClick={handleLogout} className="flex items-center justify-between py-3 cursor-pointer group border-b border-gray-100 dark:border-gray-700">
@@ -319,6 +364,35 @@ export default function Settings() {
             <div className="w-[70px] h-[70px] mx-auto"></div> 
             <button onClick={() => handleKeyPress('0')} className="w-[70px] h-[70px] rounded-full flex items-center justify-center text-3xl text-white font-medium hover:bg-white/10 active:bg-white/20 transition-all mx-auto">0</button>
             <button onClick={handlePinDelete} className="w-[70px] h-[70px] rounded-full flex items-center justify-center text-3xl text-white font-medium hover:bg-white/10 active:bg-white/20 transition-all mx-auto"><Delete className="w-8 h-8" /></button>
+          </div>
+        </div>
+      )}
+
+      {showToneModal && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowToneModal(false)}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+            <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4">Set Default Tone</h3>
+            <div className="flex flex-col gap-2">
+              {[1, 2, 3, 4, 5].map(num => {
+                const toneId = `ringtone${num}`;
+                const currentTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
+                return (
+                  <button 
+                    key={toneId} 
+                    onClick={() => {
+                      new Audio(`/sounds/${toneId}.mp3`).play().catch(()=>{});
+                      localStorage.setItem('chatverse_default_tone', toneId);
+                      setShowToneModal(false);
+                    }}
+                    className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${currentTone === toneId ? 'bg-indigo-50 border border-indigo-100 dark:bg-indigo-900/30' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100'}`}
+                  >
+                    <span className="font-bold text-[15px] text-gray-800 dark:text-gray-100">Tone {num}</span>
+                    {currentTone === toneId && <Check className="w-5 h-5 text-chatverse" />}
+                  </button>
+                )
+              })}
+            </div>
+            <button onClick={() => setShowToneModal(false)} className="mt-4 w-full bg-gray-100 dark:bg-gray-700 font-bold py-3 rounded-xl dark:text-white">Cancel</button>
           </div>
         </div>
       )}

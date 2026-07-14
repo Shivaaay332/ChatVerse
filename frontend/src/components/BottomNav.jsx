@@ -14,11 +14,20 @@ export default function BottomNav() {
     const fetchStats = async () => {
       try {
         const notifRes = await api.get('/notifications/unread');
-        setUnreadCount(notifRes.data.unread || 0);
+        const notifCount = notifRes.data.unread || 0;
+        setUnreadCount(notifCount);
 
         const msgRes = await api.get('/messages/unread/total');
-        setUnreadMessagesCount(msgRes.data.unreadMessages || 0);
-      } catch (err) { /* silently fail to not interrupt UX */ }
+        const msgCount = msgRes.data.unreadMessages || 0;
+        setUnreadMessagesCount(msgCount);
+
+        // FIX: App Icon par Red Dot Badge lagana (WhatsApp style)
+        const totalUnread = notifCount + msgCount;
+        if (navigator.setAppBadge) {
+          if (totalUnread > 0) navigator.setAppBadge(totalUnread);
+          else navigator.clearAppBadge();
+        }
+      } catch (err) { /* silently fail */ }
     };
 
     fetchStats();

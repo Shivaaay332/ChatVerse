@@ -130,14 +130,17 @@ export default function ChatScreen() {
         // Uski jagah ab hum server se instantly check karenge ki usne status hide to nahi kiya hai!
         newSocket.emit('check_companion_status', { targetId: receiverId });
         
+        // LOCAL MP3 SOUND LOGIC
         if (!isMuted) {
           try {
-            const tone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
-            let audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav';
-            if (tone === 'minimal') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2354/2354-84.wav';
-            if (tone === 'retro') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-84.wav';
-            const audio = new Audio(audioSrc);
-            audio.volume = 0.4;
+            const customTone = localStorage.getItem(`cv_sound_${receiverId}`);
+            const globalTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
+            
+            // Agar chat ka custom tone 'default' hai ya set nahi hai, toh setting wala global bajao
+            const toneToPlay = (customTone && customTone !== 'default') ? customTone : globalTone;
+            
+            const audio = new Audio(`/sounds/${toneToPlay}.mp3`);
+            audio.volume = 0.5;
             audio.play();
           } catch(e){}
         }
@@ -389,13 +392,12 @@ export default function ChatScreen() {
   };
 
   const testAndSetSound = (toneId) => {
-    let audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav';
-    if (toneId === 'minimal') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2354/2354-84.wav';
-    if (toneId === 'retro') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-84.wav';
-    
-    const audio = new Audio(audioSrc);
-    audio.volume = 0.5;
-    audio.play();
+    try {
+      const toneToPlay = toneId === 'default' ? (localStorage.getItem('chatverse_default_tone') || 'ringtone1') : toneId;
+      const audio = new Audio(`/sounds/${toneToPlay}.mp3`);
+      audio.volume = 0.5;
+      audio.play();
+    } catch(e) {}
 
     localStorage.setItem(`cv_sound_${receiverId}`, toneId);
     setShowSoundModal(false);
@@ -822,29 +824,32 @@ export default function ChatScreen() {
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowSoundModal(false)}>
           <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-              <Music className="w-5 h-5 text-indigo-400" /> Notification Tone
+              <Music className="w-5 h-5 text-indigo-400" /> Chat Tone
             </h3>
             <div className="flex flex-col gap-2">
               {[
-                { id: 'default', name: 'Default Pop' },
-                { id: 'minimal', name: 'Minimal Chime' },
-                { id: 'retro', name: 'Retro Ping' }
+                { id: 'default', name: 'Default (Settings)' },
+                { id: 'ringtone1', name: 'Tone 1' },
+                { id: 'ringtone2', name: 'Tone 2' },
+                { id: 'ringtone3', name: 'Tone 3' },
+                { id: 'ringtone4', name: 'Tone 4' },
+                { id: 'ringtone5', name: 'Tone 5' }
               ].map(tone => {
                 const currentTone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
                 return (
                   <button 
                     key={tone.id} 
                     onClick={() => testAndSetSound(tone.id)}
-                    className={`flex items-center justify-between p-4 rounded-2xl transition-colors ${currentTone === tone.id ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                    className={`flex items-center justify-between p-3.5 rounded-2xl transition-colors ${currentTone === tone.id ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                   >
-                    <span className="font-bold text-[15px] text-gray-800 dark:text-gray-100">{tone.name}</span>
+                    <span className="font-bold text-[14.5px] text-gray-800 dark:text-gray-100">{tone.name}</span>
                     {currentTone === tone.id && <Check className="w-5 h-5 text-chatverse" />}
                   </button>
                 )
               })}
             </div>
-            <p className="text-center text-[12px] text-gray-400 mt-4 px-2">Tap a tone to hear a preview.</p>
-            <button onClick={() => setShowSoundModal(false)} className="mt-3 w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 rounded-xl">Done</button>
+            <p className="text-center text-[12px] text-gray-400 mt-3 px-2">Tap a tone to hear a preview.</p>
+            <button onClick={() => setShowSoundModal(false)} className="mt-2 w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 rounded-xl">Done</button>
           </div>
         </div>
       )}

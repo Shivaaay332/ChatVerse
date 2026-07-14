@@ -1,3 +1,5 @@
+import { io } from 'socket.io-client';
+import { SOCKET_URL } from './api';
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 
@@ -66,6 +68,39 @@ function App() {
     setIsAuthenticated(true);
     navigate('/home');
   };
+
+  // FIX: Global Push Notifications & Sound Listener
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const user = JSON.parse(localStorage.getItem('chatverse_user'));
+    const globalSocket = io(SOCKET_URL);
+    globalSocket.emit('join', user?.unique_id);
+
+    globalSocket.on('receive_message', (msg) => {
+      // Agar user already usi chat me hai, toh wahan ki sound bajegi, global nahi
+      if (window.location.pathname === `/chat/${msg.sender_id}`) return;
+
+      // 1. Play Default Sound
+      const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
+      try {
+        const audio = new Audio(`/sounds/${defaultTone}.mp3`);
+        audio.volume = 0.5;
+        audio.play();
+      } catch (e) {}
+
+      // 2. Show Native Device Push Notification (Popup)
+      if (Notification.permission === 'granted') {
+        new Notification("New Message", {
+          body: msg.content || "You received a new message.",
+          icon: "/logo.png",
+          badge: "/logo.png"
+        });
+      }
+    });
+
+    return () => globalSocket.disconnect();
+  }, [isAuthenticated]);
 
   if (loading) {
     return <div className="h-[100dvh] w-screen flex items-center justify-center bg-chatverse text-white font-bold text-xl tracking-widest animate-pulse">CHATVERSE</div>;
