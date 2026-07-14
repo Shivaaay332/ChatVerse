@@ -3,6 +3,8 @@ import { Heart, MessageCircle, Send, MoreVertical, Trash2, Edit3, Copy, Image as
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
+import { io } from 'socket.io-client';
+import { SOCKET_URL } from '../api';
 
 const timeAgo = (dateString) => {
   if (!dateString) return 'Just now';
@@ -422,7 +424,18 @@ export default function HomeFeed() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchPosts(); }, []);
+  useEffect(() => { 
+    fetchPosts(); 
+    
+    // FIX: App me online rehne ke liye HomeFeed par bhi silent socket join karo
+    // Isse dusro ko tum online dikhoge aur unke messages par turant Double Ticks aayenge
+    const feedSocket = io(SOCKET_URL);
+    if (currentUser.unique_id) {
+      feedSocket.emit('join', currentUser.unique_id);
+    }
+    
+    return () => feedSocket.disconnect();
+  }, []);
 
   const handleCreatePost = async () => {
     if (!newPost.trim()) return;

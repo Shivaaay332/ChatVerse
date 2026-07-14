@@ -16,6 +16,9 @@ export default function ChatScreen() {
   const hideReadReceipts = localStorage.getItem('chatverse_hide_readreceipts') === 'true';
   const hideLastSeen = localStorage.getItem('chatverse_hide_lastseen') === 'true';
 
+  // 👇 NAYI LINE YAHAN ADD KARO 👇
+  const hideOnline = localStorage.getItem('chatverse_hide_online') === 'true';
+
   const isMuted = localStorage.getItem(`cv_mute_${receiverId}`) === 'true';
   const hasCustomPrivacy = localStorage.getItem(`cv_privacy_${receiverId}`) === 'true';
 
@@ -67,18 +70,17 @@ export default function ChatScreen() {
   useEffect(() => {
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
-    
-    // 1. ONLINE STATUS FIX: Jab socket connect ho jaye, tabhi target ka status mango
-    newSocket.on('connect', () => {
-      newSocket.emit('join', currentUser.unique_id);
-      newSocket.emit('check_companion_status', { targetId: receiverId });
-    });
+    newSocket.emit('join', currentUser.unique_id);
+
+    // 1. ONLINE STATUS FIX: Isey direct emit karo bina on('connect') ke wait kiye
+    // Socket.io isey automatic queue karke instant bhej dega!
+    newSocket.emit('check_companion_status', { targetId: receiverId });
 
     api.get(`/messages/${receiverId}`).then(res => {
       const fetchedMessages = res.data;
       setMessages(fetchedMessages);
 
-      // 2. INITIAL SCROLL FIX: Data aate hi exact bottom par jump karega
+      // 2. BOTTOM SCROLL FIX: Chat khulte hi direct last message par bhej do
       setTimeout(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 100);
@@ -118,13 +120,15 @@ export default function ChatScreen() {
     newSocket.on('receive_message', (newMsg) => {
       if (newMsg.sender_id === receiverId) {
         
-        // Message aate hi typing indicator instant hata do
+        // 3. TYPING GLITCH FIX
         setIsTyping(false);
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
         const readMsg = { ...newMsg, status: 'read' };
         setMessages((prev) => [...prev, readMsg]);
+        
         setIsOnline(true);
+        setLastSeenTime(new Date().toISOString());
         
         if (!isMuted) {
           try {
@@ -150,14 +154,15 @@ export default function ChatScreen() {
       }
     });
 
-    // 3. TYPING ANIMATION FIX: Purane 2 duplicate listeners hata kar ye ek accurate listener lagaya hai
     newSocket.on('typing', (senderId) => {
       if (senderId === receiverId) {
         setIsTyping(true);
+        setIsOnline(true); 
+        setLastSeenTime(new Date().toISOString()); 
+        
         if (!isScrolledUpRef.current) {
           setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         }
-        
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 2000);
       }
@@ -179,7 +184,7 @@ export default function ChatScreen() {
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       newSocket.disconnect();
-    }
+    };
   }, [receiverId, currentUser.unique_id, hideReadReceipts, isMuted]);
 
   const formatTime = (dateString) => {
@@ -251,7 +256,8 @@ export default function ChatScreen() {
     e.target.style.height = 'auto';
     e.target.style.height = `${e.target.scrollHeight}px`;
 
-    if (socket && !hasCustomPrivacy) {
+    // FIX: Agar user ne "Hide Online" ON rakha hai, to Typing animation math bhejo
+    if (socket && !hasCustomPrivacy && !hideOnline) {
       socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
     }
   };
@@ -456,10 +462,10 @@ export default function ChatScreen() {
                 </h3>
                 {isTyping ? (
                   <span className="text-[11px] text-chatverse dark:text-indigo-400 font-bold italic animate-pulse">typing...</span> 
-                ) : hideLastSeen ? (
-                  <span className="text-[11px] text-gray-400 dark:text-gray-500 font-medium">Last seen hidden</span>
                 ) : isOnline ? (
                   <span className="text-[11px] text-[#4ADE80] font-bold">Online</span>
+                ) : hideLastSeen ? (
+                  <span className="text-[11px] text-gray-400 dark:text-gray-500 font-medium">Last seen hidden</span>
                 ) : (
                   <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
                     {lastSeenTime ? `Last seen ${formatLastSeen(lastSeenTime)}` : 'Last seen recently'}

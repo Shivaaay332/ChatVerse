@@ -38,6 +38,10 @@ const initializeDatabase = async () => {
     await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by TEXT[] DEFAULT '{}';`);
     // initializeDatabase() function ke andar ye line add karo:
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`);
+
+    await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_last_seen BOOLEAN DEFAULT FALSE;`);
+
+    await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_online_status BOOLEAN DEFAULT FALSE;`);
     
     console.log("✅ Database Tables Auto-Synced! Verified Column Active.");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
@@ -59,6 +63,19 @@ const authenticateToken = (req, res, next) => {
 };
 
 // --- AUTH APIs ---
+
+app.put('/api/users/me/privacy', authenticateToken, async (req, res) => {
+  try {
+    if (req.body.hideLastSeen !== undefined) {
+      await db.query(`UPDATE users SET hide_last_seen = $1 WHERE unique_id = $2`, [req.body.hideLastSeen, req.user.id]);
+    }
+    if (req.body.hideOnlineStatus !== undefined) {
+      await db.query(`UPDATE users SET hide_online_status = $1 WHERE unique_id = $2`, [req.body.hideOnlineStatus, req.user.id]);
+    }
+    res.status(200).json({ message: 'Privacy updated' });
+  } catch (err) { res.status(500).json({ error: 'Error updating privacy' }); }
+});
+
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { unique_id, email, mobile, age, gender, password } = req.body;
@@ -407,27 +424,23 @@ io.on('connection', (socket) => {
       onlineUsers.set(userId, socket.id);
       socket.userId = userId;
       
-      // pure app me broadcast karo ki ye user online aa chuka hai
-      io.emit('user_online', userId);
-
       try {
-        // AUTOMATIC TICK CONVERSION (Sent -> Delivered)
-        // Jab ye user online aaya, to isko aaye hue saare 'sent' messages ko 'delivered' mark kar do
+        // FIX: Agar Online hide hai to broadcast mat karo
+        const u = await db.query('SELECT hide_online_status FROM users WHERE unique_id = $1', [userId]);
+        if (!u.rows[0]?.hide_online_status) {
+           io.emit('user_online', userId);
+        }
+
         const undelivered = await db.query(
           `UPDATE messages SET status = 'delivered' WHERE receiver_id = $1 AND status = 'sent' RETURNING id, sender_id`,
           [userId]
         );
 
-        // Har ek sender ko notify karo ki unka message delivered ho gaya hai (Double grey ticks)
         undelivered.rows.forEach(msg => {
           const senderSocketId = onlineUsers.get(msg.sender_id);
-          if (senderSocketId) {
-            io.to(senderSocketId).emit('message_updated', { id: msg.id, status: 'delivered' });
-          }
+          if (senderSocketId) io.to(senderSocketId).emit('message_updated', { id: msg.id, status: 'delivered' });
         });
-      } catch (err) {
-        console.error("Error updating delivery status on join:", err);
-      }
+      } catch (err) { console.error(err); }
     }
   });
 
@@ -449,15 +462,9 @@ io.on('connection', (socket) => {
           AND m.is_deleted_for_me = FALSE
         )
         SELECT 
-          u.unique_id, 
-          u.username,
-          u.is_verified,
-          rm.content AS last_message,
-          rm.created_at AS last_message_time,
-          rm.reaction,
-          rm.sender_id,
-          rm.is_deleted_for_everyone,
-          rm.is_deleted_for_me,
+          u.unique_id, u.username, u.is_verified,
+          rm.content AS last_message, rm.created_at AS last_message_time,
+          rm.reaction, rm.sender_id, rm.is_deleted_for_everyone, rm.is_deleted_for_me,
           (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read' AND is_deleted_for_me = FALSE) AS unread_count
         FROM RankedMessages rm
         JOIN users u ON u.unique_id = rm.other_user_id
@@ -468,13 +475,11 @@ io.on('connection', (socket) => {
       `;
       const result = await db.query(query, [userId]);
       socket.emit('sync_complete', result.rows);
-    } catch (err) { console.error("Error syncing messages:", err); }
+    } catch (err) {}
   });
 
   socket.on('change_chat_theme', ({ themeId, senderId, receiverId }) => {
-    if (onlineUsers.get(receiverId)) {
-       io.to(onlineUsers.get(receiverId)).emit('theme_updated', { themeId });
-    }
+    if (onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('theme_updated', { themeId });
   });
 
   socket.on('send_message', async (data) => {
@@ -483,7 +488,7 @@ io.on('connection', (socket) => {
       const blockCheck = await db.query(`SELECT 1 FROM blocked_users WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)`, [senderId, receiverId]);
       if (blockCheck.rows.length > 0) return; 
 
-      const initialStatus = onlineUsers.get(receiverId) ? 'delivered' : 'sent';
+      const initialStatus = (senderId === receiverId) ? 'read' : (onlineUsers.get(receiverId) ? 'delivered' : 'sent');
       let replyContent = null;
       if (replyToId) {
         const pMsg = await db.query(`SELECT content FROM messages WHERE id = $1`, [replyToId]);
@@ -493,7 +498,7 @@ io.on('connection', (socket) => {
       
       if (onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
       socket.emit('message_status', { tempId, realId: savedMsg.rows[0].id, status: initialStatus });
-    } catch (err) { console.error(err); }
+    } catch (err) {}
   });
 
   socket.on('react_message', async ({ messageId, reaction, receiverId }) => {
@@ -507,25 +512,33 @@ io.on('connection', (socket) => {
   });
 
   socket.on('check_companion_status', async ({ targetId }) => {
-    const isTargetOnline = onlineUsers.has(targetId);
-    let lastSeen = null;
-    if (!isTargetOnline) {
-      try {
-        const res = await db.query(`SELECT last_seen FROM users WHERE unique_id = $1`, [targetId]);
-        if (res.rows.length > 0) lastSeen = res.rows[0].last_seen;
-      } catch (err) {}
-    }
-    socket.emit('companion_status_result', { targetId, isOnline: isTargetOnline, lastSeen });
+    try {
+      const u = await db.query(`SELECT last_seen, hide_last_seen, hide_online_status FROM users WHERE unique_id = $1`, [targetId]);
+      if (u.rows.length > 0) {
+        // FIX 1: Agar online/typing status hidden hai, toh force Offline with Hidden Last Seen
+        if (u.rows[0].hide_online_status) {
+          socket.emit('companion_status_result', { targetId, isOnline: false, lastSeen: u.rows[0].hide_last_seen ? null : u.rows[0].last_seen });
+          return;
+        }
+        
+        // FIX 2: Normal check
+        const isTargetOnline = onlineUsers.has(targetId);
+        socket.emit('companion_status_result', { targetId, isOnline: isTargetOnline, lastSeen: (isTargetOnline || u.rows[0].hide_last_seen) ? null : u.rows[0].last_seen });
+      }
+    } catch(e){}
   });
   
   socket.on('disconnect', async () => { 
     if (socket.userId) { 
       onlineUsers.delete(socket.userId); 
-      // User offline jaate hi uski last_seen update kar do
       try {
         await db.query(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE unique_id = $1`, [socket.userId]);
+        const u = await db.query('SELECT hide_online_status FROM users WHERE unique_id = $1', [socket.userId]);
+        // Disconnect par bhi check karo
+        if (!u.rows[0]?.hide_online_status) {
+           io.emit('user_offline', { userId: socket.userId, lastSeen: new Date().toISOString() }); 
+        }
       } catch(err) {}
-      io.emit('user_offline', { userId: socket.userId, lastSeen: new Date().toISOString() }); 
     } 
   });
 });

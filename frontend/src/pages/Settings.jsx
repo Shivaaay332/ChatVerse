@@ -17,6 +17,7 @@ export default function Settings() {
   const [darkMode, setDarkMode] = useState(localStorage.getItem('chatverse_darkmode') === 'true');
   const [appLock, setAppLock] = useState(localStorage.getItem('chatverse_applock') === 'true');
   const [hideLastSeen, setHideLastSeen] = useState(localStorage.getItem('chatverse_hide_lastseen') === 'true');
+  const [hideOnline, setHideOnline] = useState(localStorage.getItem('chatverse_hide_online') === 'true');
   const [hideReadReceipts, setHideReadReceipts] = useState(localStorage.getItem('chatverse_hide_readreceipts') === 'true');
   const [fontSizeIndex, setFontSizeIndex] = useState(parseInt(localStorage.getItem('chatverse_fontsize') || '1'));
 
@@ -55,10 +56,23 @@ export default function Settings() {
     }
   };
 
-  const handleLastSeen = () => {
+  const handleLastSeen = async () => {
     const newValue = !hideLastSeen;
     setHideLastSeen(newValue);
     localStorage.setItem('chatverse_hide_lastseen', newValue);
+    // FIX: Backend ko inform karo ki privacy update ho gayi hai
+    try { 
+      await api.put('/users/me/privacy', { hideLastSeen: newValue }); 
+    } catch(err) { console.error(err); }
+  };
+
+  const handleHideOnline = async () => {
+    const newValue = !hideOnline;
+    setHideOnline(newValue);
+    localStorage.setItem('chatverse_hide_online', newValue);
+    try { 
+      await api.put('/users/me/privacy', { hideOnlineStatus: newValue }); 
+    } catch(err) { console.error(err); }
   };
 
   const handleReadReceipts = () => {
@@ -215,6 +229,20 @@ export default function Settings() {
               <span className="font-bold text-gray-900 dark:text-white text-[15px]">Hide Last Seen</span>
             </div>
             <ToggleSwitch isOn={hideLastSeen} onToggle={handleLastSeen} />
+          </div>
+
+          {/* 👇 NAYA BUTTON YAHAN ADD KARNA HAI 👇 */}
+          <div className="flex items-center justify-between py-2 mb-3">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-indigo-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-indigo-500 dark:text-indigo-400">
+                <EyeOff className="w-5 h-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-gray-900 dark:text-white text-[15px]">Hide Online & Typing</span>
+                <span className="text-[12px] text-gray-500">Hide live status from others</span>
+              </div>
+            </div>
+            <ToggleSwitch isOn={hideOnline} onToggle={handleHideOnline} />
           </div>
 
           <div className="flex items-center justify-between py-2 mb-3">
