@@ -120,15 +120,15 @@ export default function ChatScreen() {
     newSocket.on('receive_message', (newMsg) => {
       if (newMsg.sender_id === receiverId) {
         
-        // 3. TYPING GLITCH FIX
         setIsTyping(false);
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
         const readMsg = { ...newMsg, status: 'read' };
         setMessages((prev) => [...prev, readMsg]);
         
-        setIsOnline(true);
-        setLastSeenTime(new Date().toISOString());
+        // FIX: Yahan pehle 'setIsOnline(true)' likha tha jisse privacy bypass ho rahi thi.
+        // Uski jagah ab hum server se instantly check karenge ki usne status hide to nahi kiya hai!
+        newSocket.emit('check_companion_status', { targetId: receiverId });
         
         if (!isMuted) {
           try {
@@ -292,9 +292,13 @@ export default function ChatScreen() {
     }, 50);
   };
 
+  const toggleSelection = (msg) => {
+    if (msg.is_deleted_for_everyone) return;
+    setSelectedMessages(prev => prev.some(m => m.id === msg.id) ? prev.filter(m => m.id !== msg.id) : [...prev, msg]);
+  };
+
   const handlePointerDown = (e, msg) => {
     if (msg.is_deleted_for_everyone) return;
-    
     longPressTriggered.current = false;
     swipeStartRef.current = { x: e.clientX, y: e.clientY };
     setSwipingId(msg.id);
@@ -312,10 +316,8 @@ export default function ChatScreen() {
 
   const handlePointerMove = (e, msg) => {
     if (swipingId !== msg.id || selectedMessages.length > 0) return;
-    
     const deltaX = e.clientX - swipeStartRef.current.x;
     const deltaY = Math.abs(e.clientY - swipeStartRef.current.y);
-
     if ((Math.abs(deltaX) > 10 || deltaY > 10) && pressTimer.current) clearTimeout(pressTimer.current);
     if (deltaY > 20 && swipeOffset < 20) { setSwipingId(null); setSwipeOffset(0); return; }
     if (deltaX > 0) setSwipeOffset(Math.min(deltaX, 75)); 
@@ -323,12 +325,10 @@ export default function ChatScreen() {
 
   const handlePointerUpOrLeave = (e, msg) => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
-    
     if (swipingId === msg.id) {
       if (swipeOffset >= 45) { 
         setReplyingTo(msg);
         if (window.navigator?.vibrate) window.navigator.vibrate(50);
-        // FIX: Automatically focus the text box like WhatsApp
         setTimeout(() => document.getElementById('chat-input')?.focus(), 50);
       }
       setSwipingId(null);
@@ -423,6 +423,7 @@ export default function ChatScreen() {
       onClick={handleScreenClick}
     >
       
+      {/* SELECTION HEADER (LONG PRESS OPTIONS) */}
       {selectedMessages.length > 0 ? (
         <div className="bg-chatverse text-white px-4 py-3 shadow-md flex justify-between items-center z-50 sticky top-0 transition-all">
           <div className="flex items-center gap-4">
@@ -430,23 +431,37 @@ export default function ChatScreen() {
             <span className="font-bold text-lg">{selectedMessages.length}</span>
           </div>
           <div className="flex items-center gap-3">
+            {/* Reply Button */}
             {selectedMessages.length === 1 && (
-              <button 
-                onClick={() => { 
-                  setReplyingTo(selectedMessages[0]); 
-                  setSelectedMessages([]); 
-                  setTimeout(() => document.getElementById('chat-input')?.focus(), 50); // Focus Keyboard
-                }} 
-                className="p-2 hover:bg-white/20 rounded-full"
-              >
-                <Reply className="w-5 h-5" />
-              </button>
+              <button onClick={() => { setReplyingTo(selectedMessages[0]); setSelectedMessages([]); setTimeout(() => document.getElementById('chat-input')?.focus(), 50); }} className="p-2 hover:bg-white/20 rounded-full"><Reply className="w-5 h-5" /></button>
             )}
-            <button onClick={handleStarMessages} className="p-2 hover:bg-white/20 rounded-full"><Star className="w-5 h-5" /></button>
+            
+            {/* Star Button */}
+            <button onClick={() => {
+              const ids = selectedMessages.map(m => m.id);
+              setMessages(messages.map(msg => ids.includes(msg.id) ? { ...msg, is_starred: !msg.is_starred } : msg));
+              setSelectedMessages([]);
+            }} className="p-2 hover:bg-white/20 rounded-full"><Star className="w-5 h-5" /></button>
+            
+            {/* Copy Button */}
             <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
-            <button onClick={() => handleDeleteForMe(selectedMessages[0].id)} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5" /></button>
+            
+            {/* Delete For Me Button */}
+            <button onClick={async () => {
+              const msgId = selectedMessages[0].id;
+              setMessages((prev) => prev.filter(msg => msg.id !== msgId));
+              setSelectedMessages([]);
+              try { await api.delete(`/messages/forme/${msgId}`); } catch(err){}
+            }} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5" /></button>
+            
+            {/* Delete For Everyone Button */}
             {selectedMessages.every(m => m.sender_id === currentUser.unique_id) && (
-              <button onClick={handleDeleteForEveryone} className="p-2 text-red-300 hover:text-red-100 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5"/></button>
+              <button onClick={() => {
+                const ids = selectedMessages.filter(m => m.sender_id === currentUser.unique_id).map(m => m.id);
+                setMessages(messages.map(msg => ids.includes(msg.id) ? { ...msg, content: "This message was deleted", is_deleted_for_everyone: true } : msg));
+                if (socket) ids.forEach(id => socket.emit('delete_message_everyone', { messageId: id, receiverId }));
+                setSelectedMessages([]);
+              }} className="p-2 text-red-300 hover:text-red-100 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5"/></button>
             )}
           </div>
         </div>

@@ -71,6 +71,15 @@ app.put('/api/users/me/privacy', authenticateToken, async (req, res) => {
     }
     if (req.body.hideOnlineStatus !== undefined) {
       await db.query(`UPDATE users SET hide_online_status = $1 WHERE unique_id = $2`, [req.body.hideOnlineStatus, req.user.id]);
+      
+      // FIX: Button toggle karte hi instantly dusre phones ko "Offline" signal bhej do
+      if (req.body.hideOnlineStatus === true) {
+         io.emit('user_offline', { userId: req.user.id, lastSeen: new Date().toISOString() });
+      } else {
+         if (onlineUsers.has(req.user.id)) {
+            io.emit('user_online', req.user.id);
+         }
+      }
     }
     res.status(200).json({ message: 'Privacy updated' });
   } catch (err) { res.status(500).json({ error: 'Error updating privacy' }); }
