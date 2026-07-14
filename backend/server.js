@@ -34,6 +34,8 @@ const initializeDatabase = async () => {
     `);
 
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;`);
+    // Purani CREATE queries ke just baad ye add karo:
+    await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by TEXT[] DEFAULT '{}';`);
     console.log("✅ Database Tables Auto-Synced! Verified Column Active.");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
@@ -335,6 +337,7 @@ app.get('/api/chats/recent', authenticateToken, async (req, res) => {
           ) as rn
         FROM messages m
         WHERE (m.sender_id = $1 OR m.receiver_id = $1)
+        AND NOT ($1 = ANY(m.deleted_by))
         AND m.is_deleted_for_me = FALSE
       )
       SELECT 
@@ -369,23 +372,25 @@ app.get('/api/messages/unread/total', authenticateToken, async (req, res) => {
 
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
-    const messages = await db.query(`SELECT * FROM messages WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)) AND is_deleted_for_me = FALSE ORDER BY created_at ASC`, [req.user.id, req.params.otherUserId]);
-    await db.query(`UPDATE messages SET status = 'read' WHERE sender_id = $1 AND receiver_id = $2 AND status != 'read' AND is_deleted_for_me = FALSE`, [req.params.otherUserId, req.user.id]);
+    const messages = await db.query(`SELECT * FROM messages WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)) AND NOT ($1 = ANY(deleted_by)) ORDER BY created_at ASC`, [req.user.id, req.params.otherUserId]);
+    await db.query(`UPDATE messages SET status = 'read' WHERE sender_id = $1 AND receiver_id = $2 AND status != 'read'`, [req.params.otherUserId, req.user.id]);
     res.status(200).json(messages.rows);
   } catch (err) { res.status(500).json({ error: 'Error history' }); }
 });
 
 app.delete('/api/messages/forme/:id', authenticateToken, async (req, res) => {
   try { 
-    await db.query(`DELETE FROM messages WHERE id = $1 AND (sender_id = $2 OR receiver_id = $2)`, [req.params.id, req.user.id]); 
-    res.status(200).json({ message: 'Permanently deleted message' }); 
+    // Delete ki jagah array me id add kar denge taaki message hide ho jaye
+    await db.query(`UPDATE messages SET deleted_by = array_append(deleted_by, $1) WHERE id = $2 AND (sender_id = $1 OR receiver_id = $1)`, [req.user.id, req.params.id]); 
+    res.status(200).json({ message: 'Message deleted for you' }); 
   } catch (err) { res.status(500).json({ error: 'Error delete msg' }); }
 });
 
 app.delete('/api/chats/:otherUserId', authenticateToken, async (req, res) => {
   try { 
-    await db.query(`DELETE FROM messages WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, req.params.otherUserId]); 
-    res.status(200).json({ message: 'Chat permanently wiped' }); 
+    // Yaha bhi chat wipe nahi karenge, bas requester ki ID dal denge ki usne hide kiya hai
+    await db.query(`UPDATE messages SET deleted_by = array_append(deleted_by, $1) WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)) AND NOT ($1 = ANY(deleted_by))`, [req.user.id, req.params.otherUserId]); 
+    res.status(200).json({ message: 'Chat permanently cleared for you' }); 
   } catch (err) { res.status(500).json({ error: 'Error clear' }); }
 });
 

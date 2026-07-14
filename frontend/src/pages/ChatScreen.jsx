@@ -54,6 +54,8 @@ export default function ChatScreen() {
   const swipeStartRef = useRef({ x: 0, y: 0 });
 
   const endOfMessagesRef = useRef(null);
+  const isScrolledUpRef = useRef(false); // <-- NAYA REF
+  const [newMsgBadge, setNewMsgBadge] = useState(false); // <-- NAYA STATE
   const pressTimer = useRef(null);
   const longPressTriggered = useRef(false);
   const [socket, setSocket] = useState(null);
@@ -103,26 +105,34 @@ export default function ChatScreen() {
 
     newSocket.on('receive_message', (newMsg) => {
       if (newMsg.sender_id === receiverId) {
-        setMessages((prev) => [...prev, newMsg]);
-        setIsOnline(true); // Message aaya matlab companion online hai
+        const readMsg = { ...newMsg, status: 'read' };
+        setMessages((prev) => [...prev, readMsg]);
+        setIsOnline(true);
         
-        // Custom Sound Logic
-        if (!isMuted) {
-          try {
-            const tone = localStorage.getItem(`cv_sound_${receiverId}`) || 'default';
-            let audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav';
-            if (tone === 'minimal') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2354/2354-84.wav';
-            if (tone === 'retro') audioSrc = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-84.wav';
-            
-            const audio = new Audio(audioSrc);
-            audio.volume = 0.4;
-            audio.play();
-          } catch(e){}
-        }
+        // ... (Tumhara sound wala logic yaha rahega) ...
 
         if (!hideReadReceipts) {
           newSocket.emit('mark_as_read', { messageId: newMsg.id, senderId: receiverId });
         }
+
+        // SMART SCROLL LOGIC
+        if (!isScrolledUpRef.current) {
+          setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        } else {
+          setNewMsgBadge(true); // Agar user upar hai toh bas Red Dot dikhao
+        }
+      }
+    });
+    
+    // Typing indicator wale event me bhi same karo:
+    newSocket.on('typing', (senderId) => {
+      if (senderId === receiverId) {
+        setIsTyping(true);
+        if (!isScrolledUpRef.current) {
+          setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => setIsTyping(false), 2000);
       }
     });
 
@@ -168,11 +178,12 @@ export default function ChatScreen() {
 
   const handleScroll = (e) => {
     const { scrollTop, clientHeight, scrollHeight } = e.target;
-    if (scrollHeight - scrollTop - clientHeight > 100) {
-      setShowScrollButton(true);
-    } else {
-      setShowScrollButton(false);
-    }
+    const isUp = scrollHeight - scrollTop - clientHeight > 100;
+    
+    isScrolledUpRef.current = isUp;
+    setShowScrollButton(isUp);
+    
+    if (!isUp) setNewMsgBadge(false); // Niche aate hi badge hata do
   };
 
   const scrollToBottom = () => {
@@ -195,11 +206,6 @@ export default function ChatScreen() {
       }
     }
   };
-
-  // FIX: messages.length use kiya taki pichle messages me reaction dene par scroll na ho
-  useEffect(() => {
-    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, isTyping]); 
 
   const handleTyping = (e) => {
     setMessage(e.target.value);
@@ -355,6 +361,10 @@ export default function ChatScreen() {
     if (chatTheme === 'sunset') return 'bg-gradient-to-br from-rose-100 to-orange-100 dark:from-rose-950/50 dark:to-orange-950/50';
     if (chatTheme === 'emerald') return 'bg-gradient-to-br from-emerald-50 to-teal-100 dark:from-emerald-950/50 dark:to-teal-900/50';
     if (chatTheme === 'midnight') return 'bg-gradient-to-br from-indigo-100 to-purple-200 dark:from-indigo-950/50 dark:to-purple-950/50';
+    // 2 NAYE ROMANTIC THEMES:
+    if (chatTheme === 'romantic') return 'bg-gradient-to-br from-pink-100 to-rose-200 dark:from-pink-950/60 dark:to-rose-950/60';
+    if (chatTheme === 'valentine') return 'bg-gradient-to-br from-red-50 to-pink-100 dark:from-red-950/50 dark:to-pink-900/50';
+    
     return 'bg-[#F0F2F5] dark:bg-gray-900'; 
   };
 
@@ -640,9 +650,11 @@ export default function ChatScreen() {
       {showScrollButton && (
         <div className="absolute bottom-[80px] right-4 z-50 animate-slide-up">
           <button
-            onClick={scrollToBottom}
-            className="w-10 h-10 bg-white dark:bg-gray-800 text-chatverse shadow-[0_5px_15px_rgba(0,0,0,0.15)] rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all border border-gray-100 dark:border-gray-700"
+            onClick={() => { scrollToBottom(); setNewMsgBadge(false); }}
+            className="w-10 h-10 bg-white dark:bg-gray-800 text-chatverse shadow-[0_5px_15px_rgba(0,0,0,0.15)] rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all border border-gray-100 dark:border-gray-700 relative"
           >
+            {/* WHATSAPP STYLE RED DOT UNREAD BADGE */}
+            {newMsgBadge && <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 border-2 border-white dark:border-gray-800 rounded-full animate-bounce"></span>}
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
           </button>
         </div>
@@ -721,7 +733,9 @@ export default function ChatScreen() {
                 { id: 'default', name: 'Classic Blue', style: 'bg-gray-100 dark:bg-gray-700' },
                 { id: 'sunset', name: 'Sunset Glow', style: 'bg-gradient-to-br from-rose-200 to-orange-200' },
                 { id: 'emerald', name: 'Emerald', style: 'bg-gradient-to-br from-emerald-200 to-teal-200' },
-                { id: 'midnight', name: 'Midnight', style: 'bg-gradient-to-br from-indigo-300 to-purple-300' }
+                { id: 'midnight', name: 'Midnight', style: 'bg-gradient-to-br from-indigo-300 to-purple-300' },
+                { id: 'romantic', name: 'Love Spark', style: 'bg-gradient-to-br from-pink-300 to-rose-400' },
+                { id: 'valentine', name: 'Valentine', style: 'bg-gradient-to-br from-red-300 to-pink-300' }
               ].map(theme => (
                 <button 
                   key={theme.id} 
