@@ -204,49 +204,54 @@ export default function ChatList() {
         ) : searchQuery.length > 0 ? (
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 overflow-hidden mt-2">
              <div className="px-5 py-3 text-[11px] font-black text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Search Results</div>
-             {searchResults.length > 0 ? searchResults.map((user) => (
-              <div key={user.unique_id} onClick={() => navigate(`/user/${user.unique_id}`, { state: { user } })} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-50 dark:border-gray-700 transition-colors">
-                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg uppercase shadow-sm">{user.username.charAt(0)}</div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <h3 className="font-bold text-gray-900 dark:text-white text-[16px] flex items-center">
-                      {user.username}
-                      {user.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
-                    </h3>
-                    {localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true' && <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />}
+             {/* FIX 3a: Search results ko useMemo me lock kiya for instant rendering */}
+             {useMemo(() => (
+               searchResults.length > 0 ? searchResults.map((user) => (
+                <div key={user.unique_id} onClick={() => navigate(`/user/${user.unique_id}`, { state: { user } })} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-50 dark:border-gray-700 transition-colors">
+                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg uppercase shadow-sm">{user.username.charAt(0)}</div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="font-bold text-gray-900 dark:text-white text-[16px] flex items-center">
+                        {user.username}
+                        {user.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
+                      </h3>
+                      {localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true' && <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />}
+                    </div>
+                    <p className="text-[14px] text-gray-500 dark:text-gray-400 font-medium">@{user.unique_id}</p>
                   </div>
-                  <p className="text-[14px] text-gray-500 dark:text-gray-400 font-medium">@{user.unique_id}</p>
+                  <ChevronRight className="text-gray-300 dark:text-gray-500 w-5 h-5" />
                 </div>
-                <ChevronRight className="text-gray-300 dark:text-gray-500 w-5 h-5" />
-              </div>
-            )) : <div className="text-center py-8 text-gray-400 dark:text-gray-500 font-medium text-[14px]">No users found.</div>}
+              )) : <div className="text-center py-8 text-gray-400 dark:text-gray-500 font-medium text-[14px]">No users found.</div>
+             ), [searchResults])}
           </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 mt-2 overflow-hidden">
-            {processedChats.length > 0 ? processedChats.map((user) => {
-              const hasStar = localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true';
-              const isUnread = Number(user.unread_count) > 0;
-              
-              let previewText = user.last_message || "Tap to open chat";
-              if (user.is_deleted_for_me) {
-                 previewText = "Tap to open chat";
-              } else if (user.is_deleted_for_everyone) {
-                 previewText = "🚫 This message was deleted";
-              } else {
-                 if (user.sender_id === currentUser.unique_id) previewText = `You: ${previewText}`;
-                 if (user.reaction) previewText = `${previewText} ${user.reaction}`;
-              }
+            {/* FIX 3b: Processed Chats ko memory me lock kar diya */}
+            {useMemo(() => (
+              processedChats.length > 0 ? processedChats.map((user) => {
+                const hasStar = localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true';
+                const isUnread = Number(user.unread_count) > 0;
+                
+                let previewText = user.last_message || "Tap to open chat";
+                if (user.is_deleted_for_me) {
+                   previewText = "Tap to open chat";
+                } else if (user.is_deleted_for_everyone) {
+                   previewText = "🚫 This message was deleted";
+                } else {
+                   if (user.sender_id === currentUser.unique_id) previewText = `You: ${previewText}`;
+                   if (user.reaction) previewText = `${previewText} ${user.reaction}`;
+                }
 
-              return (
-                <div 
-                  key={user.unique_id} 
-                  onPointerDown={(e) => handlePointerDown(e, user)}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUpOrLeave}
-                  onPointerLeave={handlePointerUpOrLeave}
-                  onClick={(e) => handleChatClick(e, user)}
-                  className={`group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-all active:scale-[0.98] active:opacity-70 border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''} ${longPressedChat?.unique_id === user.unique_id ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
-                >
+                return (
+                  <div 
+                    key={user.unique_id} 
+                    onPointerDown={(e) => handlePointerDown(e, user)}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUpOrLeave}
+                    onPointerLeave={handlePointerUpOrLeave}
+                    onClick={(e) => handleChatClick(e, user)}
+                    className={`group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-all active:scale-[0.98] active:opacity-70 border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''} ${longPressedChat?.unique_id === user.unique_id ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
+                  >
                   
                   <div className="w-11 h-11 shrink-0 relative pointer-events-none">
                     <div className="w-10 h-10 bg-gradient-to-tr from-chatverse to-purple-500 p-[2px] rounded-full shadow-sm">
@@ -297,14 +302,14 @@ export default function ChatList() {
               );
             }) : (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-center">
-                <div className="w-16 h-16 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3"><MessageSquare className="w-7 h-7 text-gray-300 dark:text-gray-500" /></div>
-                <h3 className="text-gray-700 dark:text-gray-300 font-bold text-[16px] mb-1">No chats yet</h3>
-                <p className="text-[13px] text-gray-500 font-medium">Search for friends to start.</p>
-              </div>
-            )}
+                  <div className="w-16 h-16 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3"><MessageSquare className="w-7 h-7 text-gray-300 dark:text-gray-500" /></div>
+                  <h3 className="text-gray-700 dark:text-gray-300 font-bold text-[16px] mb-1">No chats yet</h3>
+                  <p className="text-[13px] text-gray-500 font-medium">Search for friends to start.</p>
+                </div>
+              )
+            ), [processedChats, typingUsers, longPressedChat, currentUser.unique_id])}
           </div>
         )}
-      </div>
 
       {/* LONG PRESS DELETE MODAL (WhatsApp Style Action Menu) */}
       {longPressedChat && (

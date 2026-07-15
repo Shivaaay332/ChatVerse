@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff, Palette, Music, Heart } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -255,15 +255,20 @@ export default function ChatScreen() {
     }
   };
 
-  const handleTyping = (e) => {
+  const handleTyping = useCallback((e) => {
     setMessage(e.target.value);
-    e.target.style.height = 'auto';
-    e.target.style.height = `${e.target.scrollHeight}px`;
+    
+    // Auto-Resize Textarea without lagging the keyboard
+    const target = e.target;
+    window.requestAnimationFrame(() => {
+      target.style.height = 'auto';
+      target.style.height = `${target.scrollHeight}px`;
+    });
 
     if (socket && !hasCustomPrivacy && !hideOnline) {
       socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
     }
-  };
+  }, [socket, hasCustomPrivacy, hideOnline, currentUser.unique_id, receiverId]);
 
   const handleSend = () => {
     if (message.trim() === '') return;

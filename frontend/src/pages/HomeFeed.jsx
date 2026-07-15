@@ -6,7 +6,7 @@ import api from '../api';
 import { io } from 'socket.io-client';
 import { SOCKET_URL } from '../api';
 // NAYA IMPORT
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef, memo, useCallback } from 'react';
 
 const timeAgo = (dateString) => {
   if (!dateString) return 'Just now';
@@ -453,8 +453,13 @@ export default function HomeFeed() {
     } catch (err) { alert("Error posting"); }
   };
 
-  const updateLocalPost = (id, newContent) => { setPosts(posts.map(p => p.id === id ? { ...p, content: newContent } : p)); };
-  const removeLocalPost = (id) => { setPosts(posts.filter(p => p.id !== id)); };
+  const updateLocalPost = useCallback((id, newContent) => { 
+    setPosts(prevPosts => prevPosts.map(p => p.id === id ? { ...p, content: newContent } : p)); 
+  }, []);
+
+  const removeLocalPost = useCallback((id) => { 
+    setPosts(prevPosts => prevPosts.filter(p => p.id !== id)); 
+  }, []);
 
   return (
     <div className="h-full w-full bg-[#F4F6F8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
