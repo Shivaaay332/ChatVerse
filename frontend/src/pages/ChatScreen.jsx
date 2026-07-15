@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff, Palette, Music, Heart } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -566,7 +566,8 @@ export default function ChatScreen() {
         className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
       >
-        {messages.map((msg, index) => {
+        {/* FIX: useMemo se saare messages lock ho jayenge, type karne pe lag 0 ho jayega */}
+        {useMemo(() => messages.map((msg, index) => {
 
           const isMe = msg.sender_id === currentUser.unique_id;
           const hasReaction = !!msg.reaction;
@@ -751,7 +752,7 @@ export default function ChatScreen() {
               </div>
             </div>
           );
-        })}
+        }), [messages, selectedMessages, activeReactId, swipingId, chatTheme, currentUser.unique_id, receiverId])}
 
         {isTyping && (
           <div className="self-start max-w-[75%] mt-2 mb-2">
@@ -794,7 +795,8 @@ export default function ChatScreen() {
             onClick={(e) => e.stopPropagation()} 
             className="absolute bottom-[70px] left-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 shadow-2xl rounded-[20px] p-3 grid grid-cols-7 gap-1 z-50 w-80 h-72 overflow-y-auto no-scrollbar animate-slide-up"
           >
-            {chatEmojis.map((e, index) => (
+            {/* FIX: Emojis sirf ek baar memory me load honge, fir hamesha instant khulenge */}
+            {useMemo(() => chatEmojis.map((e, index) => (
               <button 
                 key={index} 
                 onClick={() => setMessage(prev => prev + e)} 
@@ -802,7 +804,7 @@ export default function ChatScreen() {
               >
                 {e}
               </button>
-            ))}
+            )), [])}
           </div>
         )}
 

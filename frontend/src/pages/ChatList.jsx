@@ -5,6 +5,7 @@ import { io } from 'socket.io-client';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
 import { SOCKET_URL } from '../api';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 const formatTime = (dateString) => {
   if (!dateString) return '';
@@ -158,7 +159,7 @@ export default function ChatList() {
     }
   };
 
-  const getProcessedChats = () => {
+  const processedChats = useMemo(() => {
     return [...recentChats].sort((a, b) => {
       const isAFav = localStorage.getItem(`cv_fav_${a.unique_id}`) === 'true';
       const isBFav = localStorage.getItem(`cv_fav_${b.unique_id}`) === 'true';
@@ -166,8 +167,7 @@ export default function ChatList() {
       if (!isAFav && isBFav) return 1;
       return 0; 
     });
-  };
-
+  }, [recentChats]); // Sirf tabhi sort hoga jab nayi chat aayegi
   const processedChats = getProcessedChats();
 
   return (

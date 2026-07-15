@@ -5,6 +5,8 @@ import BottomNav from '../components/BottomNav';
 import api from '../api';
 import { io } from 'socket.io-client';
 import { SOCKET_URL } from '../api';
+// NAYA IMPORT
+import { useState, useEffect, useRef, memo } from 'react';
 
 const timeAgo = (dateString) => {
   if (!dateString) return 'Just now';
@@ -23,7 +25,7 @@ const timeAgo = (dateString) => {
 };
 
 // UNIVERSAL POST COMPONENT
-export const PostItem = ({ post, onPostUpdate, onPostDelete, isModal = false, onClose }) => {
+export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = false, onClose }) => {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { unique_id: '' };
   const isMyPost = post.unique_id === currentUser.unique_id;
