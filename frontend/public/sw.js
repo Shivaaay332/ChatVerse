@@ -1,3 +1,5 @@
+// frontend/public/sw.js
+
 self.addEventListener('push', function(event) {
   if (!event.data) return;
   const data = event.data.json();
@@ -6,25 +8,25 @@ self.addEventListener('push', function(event) {
     body: data.body,
     icon: data.icon || '/logo.png',
     badge: '/logo.png',
-    vibrate: [300, 100, 300, 100, 300], // Strong Vibration for WhatsApp feel
+    vibrate: [300, 100, 300, 100, 300], // WhatsApp jaisi strong vibration
     data: { url: data.url || '/' },
-    requireInteraction: true // Screen pe ruka rahega
+    requireInteraction: true // Popup tab tak nahi hatega jab tak user na hataye
   };
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
-      let isFocused = false;
+      let isAppOpen = false;
       
-      // Check karo ki kya app abhi screen par chalu (focused) hai?
+      // Check karte hain ki kya tum abhi chatverse chala rahe ho?
       for (let client of windowClients) {
         if (client.focused) {
-          isFocused = true;
+          isAppOpen = true;
           break;
         }
       }
 
-      // AGAR APP BAND HAI YA PHONE LOCKED HAI, TABHI POPUP & RED DOT DIKHAO
-      if (!isFocused) {
+      // AGAR APP BAND HAI, YA MINIMIZE HAI, YA PHONE LOCKED HAI -> TABHI POPUP AAYEGA
+      if (!isAppOpen) {
         if ('setAppBadge' in navigator) navigator.setAppBadge(1).catch(() => {});
         return self.registration.showNotification(data.title, options);
       }

@@ -108,7 +108,7 @@ function App() {
     return outputArray;
   };
 
-  // Main Authentication & Push Setup (100% FIX)
+  // Main Authentication & Push Setup (GUARANTEED BACKGROUND PUSH)
   useEffect(() => {
     if (!isAuthenticated) return;
     
@@ -116,57 +116,42 @@ function App() {
     const globalSocket = io(SOCKET_URL);
     globalSocket.emit('join', user?.unique_id);
 
-    // 1. IN-APP SOUND & POPUP (Jab tum app me kisi bhi page par ho)
+    // IN-APP NOTIFICATION (Jab user app chala raha ho)
     globalSocket.on('receive_message', (msg) => {
-      // Agar current chat me ho to notification mat do
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
-      
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
       try { new Audio(`/sounds/${defaultTone}.mp3`).play(); } catch (e) {}
-
-      // Kisi bhi aur page par hone par screen par popup dikhayega
-      if (Notification.permission === 'granted' && 'serviceWorker' in navigator) {
-        navigator.serviceWorker.ready.then(registration => {
-          registration.showNotification(msg.username || "New Message", {
-            body: msg.content || "Sent you a message",
-            icon: "/logo.png",
-            badge: "/logo.png",
-            vibrate: [200, 100, 200],
-            requireInteraction: true,
-            data: { url: `/chat/${msg.sender_id}` }
-          });
-        });
-      }
     });
 
-    // 2. FORCE RE-SUBSCRIBE WEB PUSH (Yahi hai Double Tick & Background Popup ka secret)
+    // MASTER FIX: FORCE RE-SUBSCRIBE FOR NEW TOKEN
     const subscribeUserToPush = async () => {
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         try {
           const registration = await navigator.serviceWorker.ready;
           
-          // FIX: Purana kharab token hatao (Unsubscribe)
+          // Sabse pehle purana expired/kharab subscription delete karo
           let oldSubscription = await registration.pushManager.getSubscription();
           if (oldSubscription) {
             await oldSubscription.unsubscribe();
           }
           
-          // FIX: Naya fresh token generate karo
+          // Naya Fresh Token Generate Karo Google Server se
           const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeZ1TANY_lr2vrQQlQriTAjZ-dLZG2F2gGkQGzS1tW32MvM9gNf0';
           const newSubscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
           });
           
-          // Backend ko ye fresh token do, jisse Push kabhi fail na ho!
+          // Backend ko ye fresh token de do taaki push na ruke
           await api.post('/notifications/subscribe', newSubscription);
-        } catch(err) { console.log('Push setup failed:', err); }
+        } catch(err) { console.log('Push subscription failed:', err); }
       }
     };
 
+    // Permission Maangne ka Sahi Tarika
     if (Notification.permission === 'granted') {
        subscribeUserToPush();
-    } else {
+    } else if (Notification.permission !== 'denied') {
        Notification.requestPermission().then(perm => {
          if(perm === 'granted') subscribeUserToPush();
        });
@@ -174,7 +159,6 @@ function App() {
 
     return () => globalSocket.disconnect();
   }, [isAuthenticated]);
-
   
   if (loading) {
     return <div className="h-[100dvh] w-screen flex items-center justify-center bg-chatverse text-white font-bold text-xl tracking-widest animate-pulse">CHATVERSE</div>;

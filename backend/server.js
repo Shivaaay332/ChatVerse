@@ -535,43 +535,66 @@ io.on('connection', (socket) => {
     }
   });
 
-  // FIX: ALWAYS SEND WEB PUSH FOR LOCKED SCREENS & BACKGROUND
+  // ==========================================
+  // THE MASTER FIX: ALWAYS SEND WEB PUSH 
+  // ==========================================
   socket.on('send_message', async (data) => {
     try {
       const { tempId, senderId, receiverId, content, replyToId } = data;
       const blockCheck = await db.query(`SELECT 1 FROM blocked_users WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)`, [senderId, receiverId]);
       if (blockCheck.rows.length > 0) return; 
 
-      const initialStatus = (senderId === receiverId) ? 'read' : (onlineUsers.get(receiverId) ? 'delivered' : 'sent');
+      let initialStatus = 'sent';
       let replyContent = null;
       if (replyToId) {
         const pMsg = await db.query(`SELECT content FROM messages WHERE id = $1`, [replyToId]);
         if (pMsg.rows.length > 0) replyContent = pMsg.rows[0].content;
       }
+      
       const savedMsg = await db.query(`INSERT INTO messages (sender_id, receiver_id, content, status, reply_to_id, reply_content) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`, [senderId, receiverId, content, initialStatus, replyToId, replyContent]);
       
-      // 1. Agar socket online hai, to real-time message bhejo
+      let isReceiverActive = false;
+      
+      // 1. Agar user app screen par online hai to usko direct socket se message do
       if (onlineUsers.get(receiverId)) {
         io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
-      } 
-      
-      // 2. ALWAYS SEND WEB PUSH (Kyunki phone locked hone pe bhi socket zinda reh sakta hai)
+        isReceiverActive = true;
+      }
+
+      // 2. BACKGROUND PUSH NOTIFICATION (APP BAND YA NET OFF HONE PAR BHI)
       try {
         const userRes = await db.query('SELECT push_subscription FROM users WHERE unique_id = $1', [receiverId]);
         const senderRes = await db.query('SELECT username FROM users WHERE unique_id = $1', [senderId]);
-        const sub = userRes.rows[0]?.push_subscription;
         
+        let sub = userRes.rows[0]?.push_subscription;
         if (sub) {
-           const payload = JSON.stringify({
-             title: senderRes.rows[0]?.username || 'New Message',
-             body: content,
-             icon: '/logo.png',
-             url: `/chat/${senderId}`
-           });
-           await webpush.sendNotification(sub, payload);
+           if (typeof sub === 'string') {
+             try { sub = JSON.parse(sub); } catch(e){}
+           }
+           
+           if (sub && sub.endpoint) {
+             const payload = JSON.stringify({
+               title: senderRes.rows[0]?.username || 'New Message',
+               body: content,
+               icon: '/logo.png',
+               url: `/chat/${senderId}`
+             });
+             
+             // Fire and Forget Push Request (Bina app atkaye background me notification bhejega)
+             webpush.sendNotification(sub, payload).then(() => {
+                // Agar push Google server tak successfully chala gaya, to 'Delivered' update kardo
+                db.query(`UPDATE messages SET status = 'delivered' WHERE id = $1`, [savedMsg.rows[0].id]);
+                if(onlineUsers.get(senderId)) io.to(onlineUsers.get(senderId)).emit('message_updated', { id: savedMsg.rows[0].id, status: 'delivered' });
+             }).catch(async (e) => {
+                // Agar mobile device ne token expire kar diya hai, toh usko DB se hata do
+                if (e.statusCode === 410 || e.statusCode === 404) {
+                   await db.query(`UPDATE users SET push_subscription = NULL WHERE unique_id = $1`, [receiverId]);
+                }
+             });
+           }
         }
-      } catch(err) { console.log('Web Push Failed:', err.message); }
-      
+      } catch(err) { console.log('Push Query Error:', err.message); }
+
       socket.emit('message_status', { tempId, realId: savedMsg.rows[0].id, status: initialStatus });
     } catch (err) { console.error(err); }
   });
