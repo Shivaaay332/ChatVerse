@@ -535,7 +535,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // FIX: WEB PUSH API IMPLEMENTATION YAHAN HAI
+  // FIX: ALWAYS SEND WEB PUSH FOR LOCKED SCREENS & BACKGROUND
   socket.on('send_message', async (data) => {
     try {
       const { tempId, senderId, receiverId, content, replyToId } = data;
@@ -550,32 +550,32 @@ io.on('connection', (socket) => {
       }
       const savedMsg = await db.query(`INSERT INTO messages (sender_id, receiver_id, content, status, reply_to_id, reply_content) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`, [senderId, receiverId, content, initialStatus, replyToId, replyContent]);
       
+      // 1. Agar socket online hai, to real-time message bhejo
       if (onlineUsers.get(receiverId)) {
-        // User online hai to direct socket se bhej do
         io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
-      } else {
-        // User offline hai to usko Web Push bhej do (WhatsApp Style)
-        try {
-          const userRes = await db.query('SELECT push_subscription FROM users WHERE unique_id = $1', [receiverId]);
-          const senderRes = await db.query('SELECT username FROM users WHERE unique_id = $1', [senderId]);
-          const sub = userRes.rows[0]?.push_subscription;
-          
-          if (sub) {
-             const payload = JSON.stringify({
-               title: senderRes.rows[0]?.username || 'New Message',
-               body: content,
-               icon: '/logo.png',
-               url: `/chat/${senderId}`
-             });
-             await webpush.sendNotification(sub, payload);
-          }
-        } catch(err) { console.log('Web Push Failed:', err.message); }
-      }
+      } 
+      
+      // 2. ALWAYS SEND WEB PUSH (Kyunki phone locked hone pe bhi socket zinda reh sakta hai)
+      try {
+        const userRes = await db.query('SELECT push_subscription FROM users WHERE unique_id = $1', [receiverId]);
+        const senderRes = await db.query('SELECT username FROM users WHERE unique_id = $1', [senderId]);
+        const sub = userRes.rows[0]?.push_subscription;
+        
+        if (sub) {
+           const payload = JSON.stringify({
+             title: senderRes.rows[0]?.username || 'New Message',
+             body: content,
+             icon: '/logo.png',
+             url: `/chat/${senderId}`
+           });
+           await webpush.sendNotification(sub, payload);
+        }
+      } catch(err) { console.log('Web Push Failed:', err.message); }
       
       socket.emit('message_status', { tempId, realId: savedMsg.rows[0].id, status: initialStatus });
     } catch (err) { console.error(err); }
   });
-
+  
   socket.on('react_message', async ({ messageId, reaction, receiverId }) => {
     try { await db.query(`UPDATE messages SET reaction = $1 WHERE id = $2`, [reaction, messageId]); if(onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('message_updated', { id: messageId, reaction }); } catch (err) {}
   });

@@ -98,6 +98,17 @@ function App() {
     navigate('/home');
   };
 
+  // Helper for Push Subscriptions
+  const urlBase64ToUint8Array = (base64String) => {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) { outputArray[i] = rawData.charCodeAt(i); }
+    return outputArray;
+  };
+
+  // Main Authentication & Push Setup
   useEffect(() => {
     if (!isAuthenticated) return;
     
@@ -105,45 +116,45 @@ function App() {
     const globalSocket = io(SOCKET_URL);
     globalSocket.emit('join', user?.unique_id);
 
+    // IN-APP SOUND (Jab tum app chala rahe ho)
     globalSocket.on('receive_message', (msg) => {
-      // Agar user already usi chat me hai, toh wahan ki sound bajegi, popup nahi aayega
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
-
-      // 1. Play Tone Sound
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
-      try {
-        const audio = new Audio(`/sounds/${defaultTone}.mp3`);
-        audio.volume = 0.5;
-        audio.play();
-      } catch (e) {}
-
-      // 2. Native System Push Notification (Mobile Banner / Desktop Popup)
-      if (Notification.permission === 'granted') {
-        const title = msg.username || "New Message";
-        const options = {
-          body: msg.content || "You received a new message.",
-          icon: "/logo.png", // Dhyan rahe logo.png 'public' folder me hona chahiye
-          badge: "/logo.png",
-          vibrate: [200, 100, 200], // Mobile device vibrate hoga
-          requireInteraction: true, // Screen par ruka rahega jab tak user na hataye
-          tag: `chatverse-${msg.sender_id}` // Duplicate notifications rokne ke liye
-        };
-
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready.then(registration => {
-            registration.showNotification(title, options);
-          }).catch(() => {
-            new Notification(title, options); // SW fail hua toh normal popup bhejega
-          });
-        } else {
-          new Notification(title, options);
-        }
-      }
+      try { new Audio(`/sounds/${defaultTone}.mp3`).play(); } catch (e) {}
     });
+
+    // BACKGROUND WEB PUSH REGISTRATION
+    const subscribeUserToPush = async () => {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        try {
+          const registration = await navigator.serviceWorker.ready;
+          let subscription = await registration.pushManager.getSubscription();
+          
+          if (!subscription) {
+             const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeZ1TANY_lr2vrQQlQriTAjZ-dLZG2F2gGkQGzS1tW32MvM9gNf0';
+             subscription = await registration.pushManager.subscribe({
+               userVisibleOnly: true,
+               applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
+             });
+          }
+          // Server pe subscription bhej do
+          await api.post('/notifications/subscribe', subscription);
+        } catch(err) { console.log('Push subscription failed:', err); }
+      }
+    };
+
+    if (Notification.permission === 'granted') {
+       subscribeUserToPush();
+    } else {
+       Notification.requestPermission().then(perm => {
+         if(perm === 'granted') subscribeUserToPush();
+       });
+    }
 
     return () => globalSocket.disconnect();
   }, [isAuthenticated]);
 
+  
   if (loading) {
     return <div className="h-[100dvh] w-screen flex items-center justify-center bg-chatverse text-white font-bold text-xl tracking-widest animate-pulse">CHATVERSE</div>;
   }
