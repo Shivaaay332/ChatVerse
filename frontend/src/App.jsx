@@ -98,7 +98,7 @@ function App() {
     navigate('/home');
   };
 
-  // Helper for Push Subscriptions
+  // VAPID KEY CONVERTER
   const urlBase64ToUint8Array = (base64String) => {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
@@ -108,7 +108,7 @@ function App() {
     return outputArray;
   };
 
-  // Main Authentication & Push Setup (GUARANTEED BACKGROUND PUSH)
+  // MAIN SOCKET & PUSH NOTIFICATION SETUP
   useEffect(() => {
     if (!isAuthenticated) return;
     
@@ -116,45 +116,45 @@ function App() {
     const globalSocket = io(SOCKET_URL);
     globalSocket.emit('join', user?.unique_id);
 
-    // IN-APP NOTIFICATION (Jab user app chala raha ho)
+    // 1. IN-APP SOUND (Jab app open ho)
     globalSocket.on('receive_message', (msg) => {
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
       try { new Audio(`/sounds/${defaultTone}.mp3`).play(); } catch (e) {}
     });
 
-    // MASTER FIX: FORCE RE-SUBSCRIBE FOR NEW TOKEN
-    const subscribeUserToPush = async () => {
+    // 2. FORCE GENERATE NEW TOKEN & SUBSCRIBE
+    const setupPushNotification = async () => {
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         try {
           const registration = await navigator.serviceWorker.ready;
           
-          // Sabse pehle purana expired/kharab subscription delete karo
-          let oldSubscription = await registration.pushManager.getSubscription();
-          if (oldSubscription) {
-            await oldSubscription.unsubscribe();
-          }
-          
-          // Naya Fresh Token Generate Karo Google Server se
+          // Naya Fresh Token Generate Karo
           const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeZ1TANY_lr2vrQQlQriTAjZ-dLZG2F2gGkQGzS1tW32MvM9gNf0';
           const newSubscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
           });
           
-          // Backend ko ye fresh token de do taaki push na ruke
+          // Database me save karo
           await api.post('/notifications/subscribe', newSubscription);
-        } catch(err) { console.log('Push subscription failed:', err); }
+          console.log("✅ Web Push Successfully Subscribed!");
+        } catch(err) { console.log('❌ Push Setup Failed:', err); }
       }
     };
 
-    // Permission Maangne ka Sahi Tarika
+    // SMART PERMISSION SYSTEM (Browser Blocking Rokne Ke Liye)
     if (Notification.permission === 'granted') {
-       subscribeUserToPush();
-    } else if (Notification.permission !== 'denied') {
-       Notification.requestPermission().then(perm => {
-         if(perm === 'granted') subscribeUserToPush();
-       });
+       setupPushNotification();
+    } else if (Notification.permission === 'default') {
+       // Jab user app me pehli baar touch karega, tab permission mangega (100% works)
+       const requestPermissionOnClick = () => {
+          Notification.requestPermission().then(perm => {
+            if (perm === 'granted') setupPushNotification();
+            document.removeEventListener('click', requestPermissionOnClick);
+          });
+       };
+       document.addEventListener('click', requestPermissionOnClick);
     }
 
     return () => globalSocket.disconnect();

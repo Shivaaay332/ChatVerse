@@ -1,36 +1,33 @@
 // frontend/public/sw.js
 
 self.addEventListener('push', function(event) {
-  if (!event.data) return;
-  const data = event.data.json();
+  let data = { title: 'ChatVerse', body: 'New message received', url: '/' };
   
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      console.error('Push data parsing error:', e);
+    }
+  }
+
   const options = {
     body: data.body,
-    icon: data.icon || '/logo.png',
-    badge: '/logo.png',
+    icon: '/logo.png', // Logo folder me hona chahiye
+    badge: '/logo.png', // Red dot ke liye zaroori
     vibrate: [300, 100, 300, 100, 300], // WhatsApp jaisi strong vibration
     data: { url: data.url || '/' },
-    requireInteraction: true // Popup tab tak nahi hatega jab tak user na hataye
+    requireInteraction: true // Screen par ruka rahega
   };
 
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
-      let isAppOpen = false;
-      
-      // Check karte hain ki kya tum abhi chatverse chala rahe ho?
-      for (let client of windowClients) {
-        if (client.focused) {
-          isAppOpen = true;
-          break;
-        }
-      }
+  // APP BADGE (RED DOT) SET KARNE KA CODE
+  if ('setAppBadge' in navigator) {
+    navigator.setAppBadge(1).catch(err => console.log('Badge error:', err));
+  }
 
-      // AGAR APP BAND HAI, YA MINIMIZE HAI, YA PHONE LOCKED HAI -> TABHI POPUP AAYEGA
-      if (!isAppOpen) {
-        if ('setAppBadge' in navigator) navigator.setAppBadge(1).catch(() => {});
-        return self.registration.showNotification(data.title, options);
-      }
-    })
+  // GUARANTEED NOTIFICATION SHOW KAREGA
+  event.waitUntil(
+    self.registration.showNotification(data.title, options)
   );
 });
 
@@ -38,8 +35,12 @@ self.addEventListener('notificationclick', function(event) {
   event.notification.close();
   const urlToOpen = event.notification.data?.url || '/';
 
-  if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {});
+  // Click karne par badge (red dot) hata do
+  if ('clearAppBadge' in navigator) {
+    navigator.clearAppBadge().catch(() => {});
+  }
   
+  // App ko usi chat par open karega
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
       for (let client of windowClients) {
