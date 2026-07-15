@@ -6,7 +6,20 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { types } = require('pg'); 
 const db = require('./db');
+const webpush = require('web-push'); // <-- NAYA PUSH PACKAGE ADD KIYA HAI
 require('dotenv').config();
+
+// ==========================================
+// VAPID KEYS FOR BACKGROUND PUSH NOTIFICATIONS
+// ==========================================
+const publicVapidKey = process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeZ1TANY_lr2vrQQlQriTAjZ-dLZG2F2gGkQGzS1tW32MvM9gNf0';
+const privateVapidKey = process.env.VAPID_PRIVATE_KEY || 'Z52G4Xq1pWn_t2E1mS_R1U0x84q8j-0eP23C42-E6_M';
+
+webpush.setVapidDetails(
+  'mailto:support@chatverse.com',
+  publicVapidKey,
+  privateVapidKey
+);
 
 // ==========================================
 // 100% PERFECT KOLKATA (IST) TIMEZONE FIX
@@ -41,7 +54,10 @@ const initializeDatabase = async () => {
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_last_seen BOOLEAN DEFAULT FALSE;`);
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_online_status BOOLEAN DEFAULT FALSE;`);
     
-    console.log("✅ Database Tables Auto-Synced! Verified & Privacy Columns Active.");
+    // FIX: NAYA COLUMN BACKGROUND PUSH KE LIYE
+    await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS push_subscription JSON;`);
+    
+    console.log("✅ Database Tables Auto-Synced! Verified & Privacy Columns Active. Web Push Ready!");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
 initializeDatabase();
@@ -59,6 +75,15 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
+// --- SUBSCRIPTION API (New for Web Push) ---
+app.post('/api/notifications/subscribe', authenticateToken, async (req, res) => {
+  try {
+    const subscription = req.body;
+    await db.query(`UPDATE users SET push_subscription = $1 WHERE unique_id = $2`, [subscription, req.user.id]);
+    res.status(201).json({ message: 'Push Subscribed' });
+  } catch (err) { res.status(500).json({ error: 'Failed to subscribe' }); }
+});
 
 // --- AUTH APIs ---
 app.post('/api/auth/register', async (req, res) => {
@@ -102,7 +127,6 @@ app.put('/api/users/me/verify', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error verifying account' }); }
 });
 
-// MISSING PRIVACY UPDATE API
 app.put('/api/users/me/privacy', authenticateToken, async (req, res) => {
   try {
     if (req.body.hideLastSeen !== undefined) {
@@ -511,6 +535,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // FIX: WEB PUSH API IMPLEMENTATION YAHAN HAI
   socket.on('send_message', async (data) => {
     try {
       const { tempId, senderId, receiverId, content, replyToId } = data;
@@ -525,7 +550,28 @@ io.on('connection', (socket) => {
       }
       const savedMsg = await db.query(`INSERT INTO messages (sender_id, receiver_id, content, status, reply_to_id, reply_content) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`, [senderId, receiverId, content, initialStatus, replyToId, replyContent]);
       
-      if (onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
+      if (onlineUsers.get(receiverId)) {
+        // User online hai to direct socket se bhej do
+        io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
+      } else {
+        // User offline hai to usko Web Push bhej do (WhatsApp Style)
+        try {
+          const userRes = await db.query('SELECT push_subscription FROM users WHERE unique_id = $1', [receiverId]);
+          const senderRes = await db.query('SELECT username FROM users WHERE unique_id = $1', [senderId]);
+          const sub = userRes.rows[0]?.push_subscription;
+          
+          if (sub) {
+             const payload = JSON.stringify({
+               title: senderRes.rows[0]?.username || 'New Message',
+               body: content,
+               icon: '/logo.png',
+               url: `/chat/${senderId}`
+             });
+             await webpush.sendNotification(sub, payload);
+          }
+        } catch(err) { console.log('Web Push Failed:', err.message); }
+      }
+      
       socket.emit('message_status', { tempId, realId: savedMsg.rows[0].id, status: initialStatus });
     } catch (err) { console.error(err); }
   });
