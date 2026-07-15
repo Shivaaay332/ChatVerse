@@ -25,8 +25,21 @@ export default function ChatList() {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
-  const [recentChats, setRecentChats] = useState([]);
-  const [loading, setLoading] = useState(false);
+  
+  // Naya Code: App khulte hi pehle cache check karega, agar data hai to turant dikhayega
+  const [recentChats, setRecentChats] = useState(() => {
+    const cached = localStorage.getItem('chatverse_cached_recentChats');
+    return cached ? JSON.parse(cached) : [];
+  });
+  
+  const [friendsList, setFriendsList] = useState(() => {
+    const cached = localStorage.getItem('chatverse_cached_friendsList');
+    return cached ? JSON.parse(cached) : [];
+  });
+  
+  // Agar cache me data nahi hai tabhi loading true hogi warna false
+  const [loading, setLoading] = useState(recentChats.length === 0);
+
   const searchInputRef = useRef(null);
 
   const [typingUsers, setTypingUsers] = useState({});
@@ -34,7 +47,6 @@ export default function ChatList() {
 
   // Friends Modal states (kept intact for safety/future use)
   const [showFriendsModal, setShowFriendsModal] = useState(false);
-  const [friendsList, setFriendsList] = useState([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
 
   // LONG PRESS DELETE STATES & REFS
@@ -43,15 +55,27 @@ export default function ChatList() {
   const longPressTriggered = useRef(false);
   const touchStartPos = useRef({ x: 0, y: 0 });
 
-  const fetchRecentChats = async () => {
+  const fetchChatsAndFriends = async () => {
     try {
-      const res = await api.get('/chats/recent');
-      setRecentChats(res.data);
-    } catch(err) { console.error(err); }
+      // 1. Pehle recent chats mangwao aur Cache me save karo
+      const chatRes = await api.get('/chats/recent');
+      setRecentChats(chatRes.data);
+      localStorage.setItem('chatverse_cached_recentChats', JSON.stringify(chatRes.data)); 
+      
+      // 2. Fir friends list mangwao aur Cache me save karo
+      const friendRes = await api.get('/friends');
+      setFriendsList(friendRes.data);
+      localStorage.setItem('chatverse_cached_friendsList', JSON.stringify(friendRes.data)); 
+      
+      setLoading(false);
+    } catch (err) {
+      console.log("Failed to fetch data:", err);
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchRecentChats();
+    fetchChatsAndFriends();
     const newSocket = io(SOCKET_URL);
     newSocket.emit('join', currentUser.unique_id);
 
@@ -63,8 +87,8 @@ export default function ChatList() {
       setRecentChats(syncedChats);
     });
 
-    newSocket.on('receive_message', () => { fetchRecentChats(); });
-    newSocket.on('message_updated', () => { fetchRecentChats(); });
+    newSocket.on('receive_message', () => { fetchChatsAndFriends(); });
+    newSocket.on('message_updated', () => { fetchChatsAndFriends(); });
 
     newSocket.on('typing', (senderId) => {
       setTypingUsers(prev => ({ ...prev, [senderId]: true }));
@@ -152,7 +176,6 @@ export default function ChatList() {
       <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl pt-[calc(env(safe-area-inset-top)+16px)] pb-3 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Messages</h1>
-          {/* Plus icon has been removed from here as per request */}
         </div>
         <div className="relative">
           <Search className="absolute left-4 top-3.5 text-gray-400 dark:text-gray-500 w-5 h-5" />
@@ -314,7 +337,6 @@ export default function ChatList() {
         </div>
       )}
 
-      {/* (Friend Modal component is kept here intact for any future use, but button is removed) */}
       {showFriendsModal && (
         <div className="absolute inset-0 z-[100] bg-[#f4f6f8] dark:bg-gray-900 flex flex-col animate-slide-up">
           <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl px-5 py-4 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm flex items-center gap-4">

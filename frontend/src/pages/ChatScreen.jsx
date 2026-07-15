@@ -15,25 +15,20 @@ export default function ChatScreen() {
   
   const hideReadReceipts = localStorage.getItem('chatverse_hide_readreceipts') === 'true';
   const hideLastSeen = localStorage.getItem('chatverse_hide_lastseen') === 'true';
-
-  // 👇 NAYI LINE YAHAN ADD KARO 👇
   const hideOnline = localStorage.getItem('chatverse_hide_online') === 'true';
 
   const isMuted = localStorage.getItem(`cv_mute_${receiverId}`) === 'true';
   const hasCustomPrivacy = localStorage.getItem(`cv_privacy_${receiverId}`) === 'true';
 
-  // Ultra Personalization States
   const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showSoundModal, setShowSoundModal] = useState(false);
-  // 👇 NAYI LINE YAHAN ADD KARO 👇
   const [previewChatTone, setPreviewChatTone] = useState('');
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [showMenu, setShowMenu] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   
-  // Real-time Status States
   const [isOnline, setIsOnline] = useState(false);
   const [lastSeenTime, setLastSeenTime] = useState('');
 
@@ -43,29 +38,24 @@ export default function ChatScreen() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [activeReactId, setActiveReactId] = useState(null);
   
-  // Single line top 6 emojis (WhatsApp style)
   const reactionEmojis = ['❤️', '😂', '😲', '😢', '🙏', '👍'];
-  
-  // 2. Niche message likhte time use hone wale WhatsApp jaise dher saare emojis
   const chatEmojis = [
     '😀','😃','😄','😁','😆','😅','😂','🤣','🥲','☺️','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','🤡','💩','👻','💀','👽','👾','🤖','🎃','😺','😸','😹','😻','😼','😽','🙀','😿','😾',
     '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','👍','👎','✊','👊','🤛','🤜','🤞','✌️','🫰','🤟','🤘','👌','🤌','🤏','🫳','🫴','👈','👉','👆','👇','☝️','✋','🤚','🖐','🖖','👋','🤙','🫲','🫱','💪','🦾','🖕','✍️','🙏','🫵','🦶','🦵','🦿','💄','💋','👄','🦷','👅','👂','🦻','👃','👣','👁','👀','🫀','🫁','🧠','🗣','👤','👥','🫂'
   ];
   
-  // Swipe-to-Reply States
   const [swipingId, setSwipingId] = useState(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const swipeStartRef = useRef({ x: 0, y: 0 });
 
   const endOfMessagesRef = useRef(null);
-  const typingTimeoutRef = useRef(null); // <-- YE NAYI LINE ADD KARNI HAI
+  const typingTimeoutRef = useRef(null); 
   const isScrolledUpRef = useRef(false); 
   const [newMsgBadge, setNewMsgBadge] = useState(false); 
   const pressTimer = useRef(null);
   const longPressTriggered = useRef(false);
   const [socket, setSocket] = useState(null);
 
-  // MOBILE KEYBOARD VIEWPORT FIX
   const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   useEffect(() => {
@@ -73,15 +63,12 @@ export default function ChatScreen() {
     setSocket(newSocket);
     newSocket.emit('join', currentUser.unique_id);
 
-    // 1. ONLINE STATUS FIX: Isey direct emit karo bina on('connect') ke wait kiye
-    // Socket.io isey automatic queue karke instant bhej dega!
     newSocket.emit('check_companion_status', { targetId: receiverId });
 
     api.get(`/messages/${receiverId}`).then(res => {
       const fetchedMessages = res.data;
       setMessages(fetchedMessages);
 
-      // 2. BOTTOM SCROLL FIX: Chat khulte hi direct last message par bhej do
       setTimeout(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 100);
@@ -127,19 +114,13 @@ export default function ChatScreen() {
         const readMsg = { ...newMsg, status: 'read' };
         setMessages((prev) => [...prev, readMsg]);
         
-        // FIX: Yahan pehle 'setIsOnline(true)' likha tha jisse privacy bypass ho rahi thi.
-        // Uski jagah ab hum server se instantly check karenge ki usne status hide to nahi kiya hai!
         newSocket.emit('check_companion_status', { targetId: receiverId });
         
-        // LOCAL MP3 SOUND LOGIC
         if (!isMuted) {
           try {
             const customTone = localStorage.getItem(`cv_sound_${receiverId}`);
             const globalTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
-            
-            // Agar chat ka custom tone 'default' hai ya set nahi hai, toh setting wala global bajao
             const toneToPlay = (customTone && customTone !== 'default') ? customTone : globalTone;
-            
             const audio = new Audio(`/sounds/${toneToPlay}.mp3`);
             audio.volume = 0.5;
             audio.play();
@@ -187,10 +168,17 @@ export default function ChatScreen() {
 
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      newSocket.disconnect();
+      newSocket.off('companion_status_result');
+      newSocket.off('user_online');
+      newSocket.off('user_offline');
+      newSocket.off('receive_message');
+      newSocket.off('typing');
+      newSocket.off('message_status');
+      newSocket.off('message_updated');
+      newSocket.off('theme_updated');
     };
   }, [receiverId, currentUser.unique_id, hideReadReceipts, isMuted]);
-
+    
   const formatTime = (dateString) => {
     if (!dateString) return 'Now';
     const safeDateString = dateString.endsWith('Z') ? dateString : `${dateString}Z`;
@@ -219,7 +207,6 @@ export default function ChatScreen() {
     return `${date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} at ${time}`;
   };
 
-  // SMART SCROLL TO BOTTOM
   const [showScrollButton, setShowScrollButton] = useState(false);
 
   const handleScroll = (e) => {
@@ -229,20 +216,18 @@ export default function ChatScreen() {
     isScrolledUpRef.current = isUp;
     setShowScrollButton(isUp);
     
-    if (!isUp) setNewMsgBadge(false); // Niche aate hi badge hata do
+    if (!isUp) setNewMsgBadge(false); 
   };
 
   const scrollToBottom = () => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Scroll to Replied Message Logic
   const scrollToMessage = (msgId) => {
     if (!msgId) return;
     const element = document.getElementById(`msg-${msgId}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Bubble Highlight Effect
       const bubble = element.querySelector('.message-bubble');
       if (bubble) {
         bubble.classList.add('ring-4', 'ring-indigo-300', 'dark:ring-indigo-500', 'scale-[1.02]', 'transition-all', 'duration-500');
@@ -255,12 +240,9 @@ export default function ChatScreen() {
 
   const handleTyping = (e) => {
     setMessage(e.target.value);
-    
-    // Auto-Resize Textarea Logic
     e.target.style.height = 'auto';
     e.target.style.height = `${e.target.scrollHeight}px`;
 
-    // FIX: Agar user ne "Hide Online" ON rakha hai, to Typing animation math bhejo
     if (socket && !hasCustomPrivacy && !hideOnline) {
       socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
     }
@@ -289,10 +271,9 @@ export default function ChatScreen() {
       socket.emit('send_message', { tempId, senderId: currentUser.unique_id, receiverId, content: newMsg.content, replyToId: replyIdToSend });
     }
 
-    // FIX YAHAN HAI: Message send karte hi turant screen ko bottom par scroll kar do
     setTimeout(() => {
       endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-      isScrolledUpRef.current = false; // System ko bata do ki ab hum bottom par aa chuke hain
+      isScrolledUpRef.current = false;
     }, 50);
   };
 
@@ -325,7 +306,6 @@ export default function ChatScreen() {
 
     if ((Math.abs(deltaX) > 10 || deltaY > 10) && pressTimer.current) clearTimeout(pressTimer.current);
     
-    // FIX 1: Agar Vertical Scroll hua, toh smoothly wapas reset kardo pehle
     if (deltaY > 20) { 
       const swipeWrap = document.getElementById(`swipe-wrap-${msg.id}`);
       const replyIcon = document.getElementById(`reply-icon-${msg.id}`);
@@ -342,7 +322,6 @@ export default function ChatScreen() {
       return; 
     }
     
-    // FIX 2: Swiping ke time transition 'none' karo taaki ungli ke sath instant chale (0 Lag)
     if (deltaX > 0) {
       const offset = Math.min(deltaX, 75);
       const swipeWrap = document.getElementById(`swipe-wrap-${msg.id}`);
@@ -370,7 +349,6 @@ export default function ChatScreen() {
         setTimeout(() => document.getElementById('chat-input')?.focus(), 50);
       }
       
-      // FIX 3: Swipe chhodne ke baad Smooth Bounce effect wapas on karo
       const swipeWrap = document.getElementById(`swipe-wrap-${msg.id}`);
       const replyIcon = document.getElementById(`reply-icon-${msg.id}`);
       if (swipeWrap) {
@@ -389,7 +367,6 @@ export default function ChatScreen() {
 
   const handleInlineReaction = (msgId, emoji) => {
     const targetMsg = messages.find(m => m.id === msgId);
-    // Remove if clicked again
     const newReaction = (targetMsg && targetMsg.reaction === emoji) ? null : emoji;
 
     setMessages(messages.map(msg => msg.id === msgId ? { ...msg, reaction: newReaction } : msg));
@@ -425,7 +402,6 @@ export default function ChatScreen() {
     setSelectedMessages([]);
   };
 
-  // Screen Clicks dismissing everything instantly
   const handleScreenClick = (e) => {
     if (activeReactId) setActiveReactId(null);
     if (showMenu) setShowMenu(false);
@@ -456,7 +432,6 @@ export default function ChatScreen() {
     if (chatTheme === 'emerald') return 'bg-gradient-to-br from-emerald-50 to-teal-100 dark:from-emerald-950/50 dark:to-teal-900/50';
     if (chatTheme === 'midnight') return 'bg-gradient-to-br from-indigo-100 to-purple-200 dark:from-indigo-950/50 dark:to-purple-950/50';
     
-    // FIX: PREMIUM LUXURY LOVE THEMES FOR DARK MODE
     if (chatTheme === 'romantic') return 'bg-gradient-to-br from-pink-100 to-rose-200 dark:from-[#2a0815] dark:via-[#3d0b1f] dark:to-[#1a050d]';
     if (chatTheme === 'valentine') return 'bg-gradient-to-br from-red-50 to-pink-100 dark:from-[#4a0414] dark:via-[#6b051d] dark:to-[#2e020c]';
     
@@ -474,7 +449,6 @@ export default function ChatScreen() {
       onClick={handleScreenClick}
     >
       
-      {/* SELECTION HEADER (LONG PRESS OPTIONS) */}
       {selectedMessages.length > 0 ? (
         <div className="bg-chatverse text-white px-4 py-3 shadow-md flex justify-between items-center z-50 sticky top-0 transition-all">
           <div className="flex items-center gap-4">
@@ -482,22 +456,18 @@ export default function ChatScreen() {
             <span className="font-bold text-lg">{selectedMessages.length}</span>
           </div>
           <div className="flex items-center gap-3">
-            {/* Reply Button */}
             {selectedMessages.length === 1 && (
               <button onClick={() => { setReplyingTo(selectedMessages[0]); setSelectedMessages([]); setTimeout(() => document.getElementById('chat-input')?.focus(), 50); }} className="p-2 hover:bg-white/20 rounded-full"><Reply className="w-5 h-5" /></button>
             )}
             
-            {/* Star Button */}
             <button onClick={() => {
               const ids = selectedMessages.map(m => m.id);
               setMessages(messages.map(msg => ids.includes(msg.id) ? { ...msg, is_starred: !msg.is_starred } : msg));
               setSelectedMessages([]);
             }} className="p-2 hover:bg-white/20 rounded-full"><Star className="w-5 h-5" /></button>
             
-            {/* Copy Button */}
             <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
             
-            {/* Delete For Me Button (BULK DELETE FIX) */}
             <button onClick={async () => {
               const idsToDelete = selectedMessages.map(m => m.id);
               setMessages((prev) => prev.filter(msg => !idsToDelete.includes(msg.id)));
@@ -507,7 +477,6 @@ export default function ChatScreen() {
               } catch(err){}
             }} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5" /></button>
             
-            {/* Delete For Everyone Button */}
             {selectedMessages.every(m => m.sender_id === currentUser.unique_id) && (
               <button onClick={() => {
                 const ids = selectedMessages.filter(m => m.sender_id === currentUser.unique_id).map(m => m.id);
@@ -576,7 +545,6 @@ export default function ChatScreen() {
         </div>
       )}
 
-      {/* Messages Feed */}
       <div 
         className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
@@ -587,16 +555,13 @@ export default function ChatScreen() {
           const hasReaction = !!msg.reaction;
           const isSelected = selectedMessages.some(m => m.id === msg.id);
           
-          // Date Separator Logic
           const msgDate = new Date(msg.created_at || Date.now());
           const prevMsgDate = index > 0 ? new Date(messages[index - 1].created_at || Date.now()) : null;
           const showDateSeparator = !prevMsgDate || msgDate.toDateString() !== prevMsgDate.toDateString();
 
-          // Grouping Logic
           const isPrevSameSender = !showDateSeparator && index > 0 && messages[index - 1].sender_id === msg.sender_id;
           const isNextSameSender = index < messages.length - 1 && messages[index + 1].sender_id === msg.sender_id && new Date(messages[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
 
-          // Dynamic Bubble Styling
           let radiusClasses = 'rounded-2xl';
           if (isMe) {
             if (isPrevSameSender && isNextSameSender) radiusClasses = 'rounded-2xl rounded-tr-[4px] rounded-br-[4px]';
@@ -623,7 +588,6 @@ export default function ChatScreen() {
                  </div>
               )}
 
-              {/* Unread Divider */}
               {index === firstUnreadIndex && unreadCount > 0 && (
                 <div className="w-full flex justify-center my-4 relative z-0">
                   <div className="bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700 text-chatverse dark:text-indigo-400 text-[11px] font-black px-4 py-1.5 rounded-full z-10">
@@ -681,7 +645,6 @@ export default function ChatScreen() {
                       }`}
                     >
                       
-                      {/* Replied Message Styling */}
                       {msg.reply_content && !msg.is_deleted_for_everyone && (
                         <div 
                           onClick={(e) => { e.stopPropagation(); scrollToMessage(msg.reply_to_id); }}
@@ -693,7 +656,6 @@ export default function ChatScreen() {
                       
                       <div className="relative text-[15.5px] leading-[1.4] break-words">
                         <span>{msg.content}</span>
-                        {/* FIX: Improved invisible spacer width to completely avoid overlapping timestamps with text */}
                         {!msg.is_deleted_for_everyone && (
                           <span className={`inline-block h-[14px] ${isMe ? 'w-[85px]' : 'w-[60px]'}`}></span>
                         )}
@@ -707,7 +669,6 @@ export default function ChatScreen() {
                             <span className="flex items-center ml-0.5">
                               {msg.status === 'sending' && <Clock className="w-[10px] h-[10px]" />}
                               
-                              {/* NORMAL THEME TICKS */}
                               {(chatTheme !== 'romantic' && chatTheme !== 'valentine') && (
                                 <>
                                   {msg.status === 'sent' && <Check className="w-[12px] h-[12px]" />}
@@ -716,7 +677,6 @@ export default function ChatScreen() {
                                 </>
                               )}
 
-                              {/* PREMIUM LOVE THEME HEART TICKS */}
                               {(chatTheme === 'romantic' || chatTheme === 'valentine') && (
                                 <>
                                   {msg.status === 'sent' && <Heart className="w-[11px] h-[11px] text-white/60 dark:text-gray-400" />}
@@ -730,14 +690,12 @@ export default function ChatScreen() {
                       )}
                     </div>
 
-                    {/* FIX: Perfected absolute coordinates so the reaction badge never hides the timestamp */}
                     {msg.reaction && !msg.is_deleted_for_everyone && (
                       <div className={`absolute -bottom-[14px] ${isMe ? 'right-2' : 'left-2'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-30 select-none flex items-center justify-center`}>
                         {msg.reaction}
                       </div>
                     )}
 
-                    {/* Single Line Inline WhatsApp-Style Reaction Tray */}
                     {activeReactId === msg.id && (
                       <div 
                         onClick={(e) => e.stopPropagation()} 
@@ -796,7 +754,6 @@ export default function ChatScreen() {
             onClick={() => { scrollToBottom(); setNewMsgBadge(false); }}
             className="w-10 h-10 bg-white dark:bg-gray-800 text-chatverse shadow-[0_5px_15px_rgba(0,0,0,0.15)] rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all border border-gray-100 dark:border-gray-700 relative"
           >
-            {/* WHATSAPP STYLE RED DOT UNREAD BADGE */}
             {newMsgBadge && <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 border-2 border-white dark:border-gray-800 rounded-full animate-bounce"></span>}
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
           </button>

@@ -411,30 +411,35 @@ export const PostItem = ({ post, onPostUpdate, onPostDelete, isModal = false, on
 };
 
 export default function HomeFeed() {
-  const [posts, setPosts] = useState([]);
+  const [posts, setPosts] = useState(() => {
+    const cached = localStorage.getItem('chatverse_cached_posts');
+    return cached ? JSON.parse(cached) : [];
+  });
+  // Agar cache me data hai, toh loading screen kabhi nahi aayegi
+  const [loading, setLoading] = useState(posts.length === 0);
   const [newPost, setNewPost] = useState('');
-  const [loading, setLoading] = useState(true);
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { username: 'Me' };
 
   const fetchPosts = async () => {
     try {
       const res = await api.get('/posts');
-      setPosts(Array.isArray(res.data) ? res.data : []);
-    } catch (err) { setPosts([]); } 
-    finally { setLoading(false); }
+      setPosts(res.data);
+      localStorage.setItem('chatverse_cached_posts', JSON.stringify(res.data)); // Background Cache Update
+    } catch (err) {
+      console.error("Failed to fetch posts");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { 
     fetchPosts(); 
     
-    // FIX: App me online rehne ke liye HomeFeed par bhi silent socket join karo
-    // Isse dusro ko tum online dikhoge aur unke messages par turant Double Ticks aayenge
+    // FIX: Silent connection on Home Feed (Without disconnecting!)
     const feedSocket = io(SOCKET_URL);
     if (currentUser.unique_id) {
       feedSocket.emit('join', currentUser.unique_id);
     }
-    
-    return () => feedSocket.disconnect();
   }, []);
 
   const handleCreatePost = async () => {
