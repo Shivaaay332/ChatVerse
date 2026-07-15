@@ -20,7 +20,11 @@ import api from './api';
 
 function App() {
   const navigate = useNavigate();
+  
+  // FIX: Ye line missing thi isliye white screen aa rahi thi
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [isAppLocked, setIsAppLocked] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -61,6 +65,31 @@ function App() {
     }
     setLoading(false);
   }, []);
+
+  // Update detect karne ka effect
+  useEffect(() => {
+    const handleUpdateFound = () => setUpdateAvailable(true);
+    window.addEventListener('pwa-update-available', handleUpdateFound);
+    return () => window.removeEventListener('pwa-update-available', handleUpdateFound);
+  }, []);
+
+  // Update apply karne ka function
+  const applyUpdate = () => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (reg && reg.waiting) {
+          // Naye worker ko bolo ab app ka control le le
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+      });
+      // Purane saare kachre (Cache) ko permanently delete karo
+      caches.keys().then((names) => {
+        for (let name of names) caches.delete(name);
+      });
+      // 0.5 sec baad app ko hard refresh kar do
+      setTimeout(() => window.location.reload(true), 500);
+    }
+  };
 
   const handleLoginSuccess = (userData, token) => {
     localStorage.setItem('chatverse_token', token);
@@ -139,6 +168,22 @@ function App() {
           <div className="absolute top-0 left-0 w-full bg-red-500/95 backdrop-blur-sm text-white text-[12px] font-bold py-1.5 flex justify-center items-center gap-2 z-[9999] shadow-md transition-all duration-300">
             <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
             Waiting for network...
+          </div>
+        )}
+
+        {/* 🚀 UPDATE BANNER */}
+        {updateAvailable && (
+          <div className="fixed top-0 left-0 w-full bg-chatverse text-white px-4 py-3 z-[9999] flex justify-between items-center shadow-lg animate-slide-down">
+            <div className="flex flex-col">
+              <span className="font-bold text-[14px]">🚀 New Update Available!</span>
+              <span className="text-[11px] text-indigo-100">Get the latest features & bug fixes.</span>
+            </div>
+            <button 
+              onClick={applyUpdate} 
+              className="bg-white text-chatverse px-4 py-2 rounded-full text-[13px] font-black shadow-sm hover:scale-105 active:scale-95 transition-all"
+            >
+              Update Now
+            </button>
           </div>
         )}
 

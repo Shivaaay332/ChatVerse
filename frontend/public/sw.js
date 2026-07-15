@@ -41,5 +41,13 @@ self.addEventListener('notificationclick', function(event) {
   );
 });
 
-self.addEventListener('install', (event) => self.skipWaiting());
+
 self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
+// frontend/public/sw.js ke sabse aakhir me ye lagayein
+
+self.addEventListener('message', (event) => {
+  // Jab app se SKIP_WAITING ka message aaye, tabhi naya update apply karo
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
