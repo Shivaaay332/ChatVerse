@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff, Palette, Music } from 'lucide-react';
+import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff, Palette, Music, Heart } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import api from '../api';
@@ -322,21 +322,68 @@ export default function ChatScreen() {
     if (swipingId !== msg.id || selectedMessages.length > 0) return;
     const deltaX = e.clientX - swipeStartRef.current.x;
     const deltaY = Math.abs(e.clientY - swipeStartRef.current.y);
+
     if ((Math.abs(deltaX) > 10 || deltaY > 10) && pressTimer.current) clearTimeout(pressTimer.current);
-    if (deltaY > 20 && swipeOffset < 20) { setSwipingId(null); setSwipeOffset(0); return; }
-    if (deltaX > 0) setSwipeOffset(Math.min(deltaX, 75)); 
+    
+    // FIX 1: Agar Vertical Scroll hua, toh smoothly wapas reset kardo pehle
+    if (deltaY > 20) { 
+      const swipeWrap = document.getElementById(`swipe-wrap-${msg.id}`);
+      const replyIcon = document.getElementById(`reply-icon-${msg.id}`);
+      if (swipeWrap) {
+        swipeWrap.style.transition = 'transform 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28)';
+        swipeWrap.style.transform = `translate3d(0px, 0, 0)`;
+      }
+      if (replyIcon) {
+        replyIcon.style.transition = 'all 0.2s ease-out';
+        replyIcon.style.opacity = 0;
+        replyIcon.style.transform = `scale(0)`;
+      }
+      setSwipingId(null); 
+      return; 
+    }
+    
+    // FIX 2: Swiping ke time transition 'none' karo taaki ungli ke sath instant chale (0 Lag)
+    if (deltaX > 0) {
+      const offset = Math.min(deltaX, 75);
+      const swipeWrap = document.getElementById(`swipe-wrap-${msg.id}`);
+      const replyIcon = document.getElementById(`reply-icon-${msg.id}`);
+      
+      if (swipeWrap) {
+        swipeWrap.style.transition = 'none'; 
+        swipeWrap.style.transform = `translate3d(${offset}px, 0, 0)`;
+      }
+      if (replyIcon) {
+        replyIcon.style.transition = 'none';
+        replyIcon.style.opacity = Math.min(offset / 40, 1);
+        replyIcon.style.transform = `scale(${Math.min(offset / 40, 1)})`;
+      }
+    } 
   };
 
   const handlePointerUpOrLeave = (e, msg) => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
     if (swipingId === msg.id) {
-      if (swipeOffset >= 45) { 
+      const deltaX = e.clientX - swipeStartRef.current.x;
+      if (deltaX >= 45) { 
         setReplyingTo(msg);
         if (window.navigator?.vibrate) window.navigator.vibrate(50);
         setTimeout(() => document.getElementById('chat-input')?.focus(), 50);
       }
+      
+      // FIX 3: Swipe chhodne ke baad Smooth Bounce effect wapas on karo
+      const swipeWrap = document.getElementById(`swipe-wrap-${msg.id}`);
+      const replyIcon = document.getElementById(`reply-icon-${msg.id}`);
+      if (swipeWrap) {
+        swipeWrap.style.transition = 'transform 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28)';
+        swipeWrap.style.transform = `translate3d(0px, 0, 0)`;
+      }
+      if (replyIcon) {
+        replyIcon.style.transition = 'all 0.2s ease-out';
+        replyIcon.style.opacity = 0;
+        replyIcon.style.transform = `scale(0)`;
+      }
+      
       setSwipingId(null);
-      setSwipeOffset(0);
     }
   };
 
@@ -408,9 +455,10 @@ export default function ChatScreen() {
     if (chatTheme === 'sunset') return 'bg-gradient-to-br from-rose-100 to-orange-100 dark:from-rose-950/50 dark:to-orange-950/50';
     if (chatTheme === 'emerald') return 'bg-gradient-to-br from-emerald-50 to-teal-100 dark:from-emerald-950/50 dark:to-teal-900/50';
     if (chatTheme === 'midnight') return 'bg-gradient-to-br from-indigo-100 to-purple-200 dark:from-indigo-950/50 dark:to-purple-950/50';
-    // 2 NAYE ROMANTIC THEMES:
-    if (chatTheme === 'romantic') return 'bg-gradient-to-br from-pink-100 to-rose-200 dark:from-pink-950/60 dark:to-rose-950/60';
-    if (chatTheme === 'valentine') return 'bg-gradient-to-br from-red-50 to-pink-100 dark:from-red-950/50 dark:to-pink-900/50';
+    
+    // FIX: PREMIUM LUXURY LOVE THEMES FOR DARK MODE
+    if (chatTheme === 'romantic') return 'bg-gradient-to-br from-pink-100 to-rose-200 dark:from-[#2a0815] dark:via-[#3d0b1f] dark:to-[#1a050d]';
+    if (chatTheme === 'valentine') return 'bg-gradient-to-br from-red-50 to-pink-100 dark:from-[#4a0414] dark:via-[#6b051d] dark:to-[#2e020c]';
     
     return 'bg-[#F0F2F5] dark:bg-gray-900'; 
   };
@@ -449,12 +497,14 @@ export default function ChatScreen() {
             {/* Copy Button */}
             <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
             
-            {/* Delete For Me Button */}
+            {/* Delete For Me Button (BULK DELETE FIX) */}
             <button onClick={async () => {
-              const msgId = selectedMessages[0].id;
-              setMessages((prev) => prev.filter(msg => msg.id !== msgId));
+              const idsToDelete = selectedMessages.map(m => m.id);
+              setMessages((prev) => prev.filter(msg => !idsToDelete.includes(msg.id)));
               setSelectedMessages([]);
-              try { await api.delete(`/messages/forme/${msgId}`); } catch(err){}
+              try { 
+                await Promise.all(idsToDelete.map(id => api.delete(`/messages/forme/${id}`))); 
+              } catch(err){}
             }} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5" /></button>
             
             {/* Delete For Everyone Button */}
@@ -603,14 +653,14 @@ export default function ChatScreen() {
                 <div className="relative max-w-[80%] flex flex-col">
                   
                   {swipingId === msg.id && (
-                    <div className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
-                         style={{ left: '-6px', opacity: Math.min(swipeOffset / 40, 1), transform: `scale(${Math.min(swipeOffset / 40, 1)})` }}>
+                    <div id={`reply-icon-${msg.id}`} className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
+                         style={{ left: '-6px', opacity: 0, transform: 'scale(0)' }}>
                       <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
                     </div>
                   )}
 
-                  <div className="relative flex flex-col z-20"
-                       style={{ transform: swipingId === msg.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
+                  <div id={`swipe-wrap-${msg.id}`} className="relative flex flex-col z-20"
+                       style={{ transform: 'translate3d(0px, 0, 0)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
                     
                     <div 
                       onClick={(e) => { 
@@ -622,6 +672,7 @@ export default function ChatScreen() {
                       onPointerMove={(e) => { e.stopPropagation(); handlePointerMove(e, msg); }}
                       onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(e, msg); }}
                       onPointerLeave={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
+                      onPointerCancel={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
                       className={`message-bubble relative px-3 pt-2 pb-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
                         isSelected ? `bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 ${radiusClasses}` :
                         msg.is_deleted_for_everyone ? `bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 ${radiusClasses}` 
@@ -655,9 +706,24 @@ export default function ChatScreen() {
                           {isMe && (
                             <span className="flex items-center ml-0.5">
                               {msg.status === 'sending' && <Clock className="w-[10px] h-[10px]" />}
-                              {msg.status === 'sent' && <Check className="w-[12px] h-[12px]" />}
-                              {msg.status === 'delivered' && <CheckCheck className="w-[14px] h-[14px] text-indigo-200" />}
-                              {msg.status === 'read' && <CheckCheck className="w-[14px] h-[14px] text-[#4ADE80]" />}
+                              
+                              {/* NORMAL THEME TICKS */}
+                              {(chatTheme !== 'romantic' && chatTheme !== 'valentine') && (
+                                <>
+                                  {msg.status === 'sent' && <Check className="w-[12px] h-[12px]" />}
+                                  {msg.status === 'delivered' && <CheckCheck className="w-[14px] h-[14px] text-indigo-200" />}
+                                  {msg.status === 'read' && <CheckCheck className="w-[14px] h-[14px] text-[#4ADE80]" />}
+                                </>
+                              )}
+
+                              {/* PREMIUM LOVE THEME HEART TICKS */}
+                              {(chatTheme === 'romantic' || chatTheme === 'valentine') && (
+                                <>
+                                  {msg.status === 'sent' && <Heart className="w-[11px] h-[11px] text-white/60 dark:text-gray-400" />}
+                                  {msg.status === 'delivered' && <Heart className="w-[11px] h-[11px] text-white fill-white" />}
+                                  {msg.status === 'read' && <Heart className="w-[12px] h-[12px] text-[#ff4b4b] fill-[#ff4b4b] drop-shadow-md animate-pulse" />}
+                                </>
+                              )}
                             </span>
                           )}
                         </div>
