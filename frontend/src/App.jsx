@@ -69,7 +69,6 @@ function App() {
     navigate('/home');
   };
 
-  // FIX: Global Push Notifications & Sound Listener (Mobile Native)
   useEffect(() => {
     if (!isAuthenticated) return;
     
@@ -78,9 +77,10 @@ function App() {
     globalSocket.emit('join', user?.unique_id);
 
     globalSocket.on('receive_message', (msg) => {
+      // Agar user already usi chat me hai, toh wahan ki sound bajegi, popup nahi aayega
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
 
-      // 1. Play Sound
+      // 1. Play Tone Sound
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
       try {
         const audio = new Audio(`/sounds/${defaultTone}.mp3`);
@@ -88,17 +88,27 @@ function App() {
         audio.play();
       } catch (e) {}
 
-      // 2. Native Device Push Notification (Mobile Supported)
-      if (Notification.permission === 'granted' && 'serviceWorker' in navigator) {
-        navigator.serviceWorker.ready.then((registration) => {
-          registration.showNotification(msg.username || "New Message", {
-            body: msg.content || "You received a new message.",
-            icon: "/logo.png", // Dhyan rahe public folder me logo.png hona chahiye
-            badge: "/logo.png",
-            vibrate: [200, 100, 200], // Phone vibrate hoga
-            tag: "chatverse-message"
+      // 2. Native System Push Notification (Mobile Banner / Desktop Popup)
+      if (Notification.permission === 'granted') {
+        const title = msg.username || "New Message";
+        const options = {
+          body: msg.content || "You received a new message.",
+          icon: "/logo.png", // Dhyan rahe logo.png 'public' folder me hona chahiye
+          badge: "/logo.png",
+          vibrate: [200, 100, 200], // Mobile device vibrate hoga
+          requireInteraction: true, // Screen par ruka rahega jab tak user na hataye
+          tag: `chatverse-${msg.sender_id}` // Duplicate notifications rokne ke liye
+        };
+
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then(registration => {
+            registration.showNotification(title, options);
+          }).catch(() => {
+            new Notification(title, options); // SW fail hua toh normal popup bhejega
           });
-        });
+        } else {
+          new Notification(title, options);
+        }
       }
     });
 

@@ -1,15 +1,21 @@
 // frontend/public/sw.js
 self.addEventListener('notificationclick', function(event) {
-  event.notification.close(); // Notification pe click karte hi usko band karo
-  
-  // Click karne par App open karo (WhatsApp jaisa behavior)
+  event.notification.close();
   event.waitUntil(
     clients.matchAll({ type: 'window' }).then(windowClients => {
       if (windowClients.length > 0) {
-        windowClients[0].focus(); // Agar app background me hai toh aage le aao
+        windowClients[0].focus(); 
       } else {
-        clients.openWindow('/'); // Agar puri tarah band hai toh naya open karo
+        clients.openWindow('/');
       }
     })
   );
+});
+
+// Ye zaroori hai mobile me service worker ko instantly activate karne ke liye
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
+self.addEventListener('activate', (event) => {
+  event.waitUntil(clients.claim());
 });
