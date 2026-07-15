@@ -226,16 +226,25 @@ export default function ChatScreen() {
 
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  const handleScroll = (e) => {
+  // FIX 2: Scroll Event Thrashing Fix (Butter Smooth Scrolling)
+  // Ye state ko har micro-second update hone se rokega aur 60 FPS maintain karega.
+  const handleScroll = useCallback((e) => {
     const { scrollTop, clientHeight, scrollHeight } = e.target;
     const isUp = scrollHeight - scrollTop - clientHeight > 100;
     
     isScrolledUpRef.current = isUp;
-    setShowScrollButton(isUp);
     
-    if (!isUp) setNewMsgBadge(false); 
-  };
-
+    // Sirf tabhi update karo jab status sach me change hua ho
+    setShowScrollButton(prev => {
+      if (prev !== isUp) return isUp;
+      return prev;
+    });
+    
+    if (!isUp && newMsgBadge) {
+      setNewMsgBadge(false);
+    }
+  }, [newMsgBadge]); // <-- useCallback dependencies
+  
   const scrollToBottom = () => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -460,9 +469,16 @@ export default function ChatScreen() {
     return 'bg-[#F0F2F5] dark:bg-gray-900'; 
   };
 
-  const visibleMessages = messages.filter(m => !m.is_deleted_for_me);
-  const firstUnreadIndex = visibleMessages.findIndex(m => m.sender_id === receiverId && m.status !== 'read');
-  const unreadCount = visibleMessages.filter(m => m.sender_id === receiverId && m.status !== 'read').length;
+  const visibleMessages = useMemo(() => {
+    return messages.filter(m => !m.is_deleted_for_me);
+  }, [messages]);
+  const firstUnreadIndex = useMemo(() => {
+    return visibleMessages.findIndex(m => m.sender_id === receiverId && m.status !== 'read');
+  }, [visibleMessages, receiverId]);
+
+  const unreadCount = useMemo(() => {
+    return visibleMessages.filter(m => m.sender_id === receiverId && m.status !== 'read').length;
+  }, [visibleMessages, receiverId]);
 
   return (
     <div 

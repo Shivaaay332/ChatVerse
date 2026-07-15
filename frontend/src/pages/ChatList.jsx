@@ -1,4 +1,3 @@
-import { useState, useEffect, useRef } from 'react';
 import { Search, Loader, MessageSquare, ChevronRight, Star, ArrowLeft, BadgeCheck, Trash2, UserPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -167,8 +166,7 @@ export default function ChatList() {
       if (!isAFav && isBFav) return 1;
       return 0; 
     });
-  }, [recentChats]); // Sirf tabhi sort hoga jab nayi chat aayegi
-  const processedChats = getProcessedChats();
+  }, [recentChats]); // Dependency: Sirf tab chale jab recentChats badle
 
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
