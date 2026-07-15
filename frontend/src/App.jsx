@@ -69,7 +69,7 @@ function App() {
     navigate('/home');
   };
 
-  // FIX: Global Push Notifications & Sound Listener
+  // FIX: Global Push Notifications & Sound Listener (Mobile Native)
   useEffect(() => {
     if (!isAuthenticated) return;
     
@@ -78,10 +78,9 @@ function App() {
     globalSocket.emit('join', user?.unique_id);
 
     globalSocket.on('receive_message', (msg) => {
-      // Agar user already usi chat me hai, toh wahan ki sound bajegi, global nahi
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
 
-      // 1. Play Default Sound
+      // 1. Play Sound
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
       try {
         const audio = new Audio(`/sounds/${defaultTone}.mp3`);
@@ -89,12 +88,16 @@ function App() {
         audio.play();
       } catch (e) {}
 
-      // 2. Show Native Device Push Notification (Popup)
-      if (Notification.permission === 'granted') {
-        new Notification("New Message", {
-          body: msg.content || "You received a new message.",
-          icon: "/logo.png",
-          badge: "/logo.png"
+      // 2. Native Device Push Notification (Mobile Supported)
+      if (Notification.permission === 'granted' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((registration) => {
+          registration.showNotification(msg.username || "New Message", {
+            body: msg.content || "You received a new message.",
+            icon: "/logo.png", // Dhyan rahe public folder me logo.png hona chahiye
+            badge: "/logo.png",
+            vibrate: [200, 100, 200], // Phone vibrate hoga
+            tag: "chatverse-message"
+          });
         });
       }
     });

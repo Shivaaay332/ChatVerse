@@ -11,7 +11,7 @@ export default function BottomNav() {
 
   // Poll for both notifications and unread messages every 5 seconds for Real-time UX
   useEffect(() => {
-    const fetchStats = async () => {
+   const fetchStats = async () => {
       try {
         const notifRes = await api.get('/notifications/unread');
         const notifCount = notifRes.data.unread || 0;
@@ -21,11 +21,14 @@ export default function BottomNav() {
         const msgCount = msgRes.data.unreadMessages || 0;
         setUnreadMessagesCount(msgCount);
 
-        // FIX: App Icon par Red Dot Badge lagana (WhatsApp style)
+        // FIX: App Icon par Red Dot Badge lagana
         const totalUnread = notifCount + msgCount;
-        if (navigator.setAppBadge) {
-          if (totalUnread > 0) navigator.setAppBadge(totalUnread);
-          else navigator.clearAppBadge();
+        if ('setAppBadge' in navigator && 'clearAppBadge' in navigator) {
+          if (totalUnread > 0) {
+            navigator.setAppBadge(totalUnread).catch(e => console.log(e));
+          } else {
+            navigator.clearAppBadge().catch(e => console.log(e));
+          }
         }
       } catch (err) { /* silently fail */ }
     };
