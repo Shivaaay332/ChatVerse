@@ -34,16 +34,14 @@ const initializeDatabase = async () => {
     `);
 
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;`);
-    // Purani CREATE queries ke just baad ye add karo:
     await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by TEXT[] DEFAULT '{}';`);
-    // initializeDatabase() function ke andar ye line add karo:
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`);
-
+    
+    // MISSING PRIVACY COLUMNS FIX
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_last_seen BOOLEAN DEFAULT FALSE;`);
-
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_online_status BOOLEAN DEFAULT FALSE;`);
     
-    console.log("✅ Database Tables Auto-Synced! Verified Column Active.");
+    console.log("✅ Database Tables Auto-Synced! Verified & Privacy Columns Active.");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
 initializeDatabase();
@@ -63,28 +61,6 @@ const authenticateToken = (req, res, next) => {
 };
 
 // --- AUTH APIs ---
-
-app.put('/api/users/me/privacy', authenticateToken, async (req, res) => {
-  try {
-    if (req.body.hideLastSeen !== undefined) {
-      await db.query(`UPDATE users SET hide_last_seen = $1 WHERE unique_id = $2`, [req.body.hideLastSeen, req.user.id]);
-    }
-    if (req.body.hideOnlineStatus !== undefined) {
-      await db.query(`UPDATE users SET hide_online_status = $1 WHERE unique_id = $2`, [req.body.hideOnlineStatus, req.user.id]);
-      
-      // FIX: Button toggle karte hi instantly dusre phones ko "Offline" signal bhej do
-      if (req.body.hideOnlineStatus === true) {
-         io.emit('user_offline', { userId: req.user.id, lastSeen: new Date().toISOString() });
-      } else {
-         if (onlineUsers.has(req.user.id)) {
-            io.emit('user_online', req.user.id);
-         }
-      }
-    }
-    res.status(200).json({ message: 'Privacy updated' });
-  } catch (err) { res.status(500).json({ error: 'Error updating privacy' }); }
-});
-
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { unique_id, email, mobile, age, gender, password } = req.body;
@@ -95,6 +71,7 @@ app.post('/api/auth/register', async (req, res) => {
     res.status(201).json({ message: 'Account created!', user: newUser.rows[0] });
   } catch (err) { res.status(500).json({ error: 'Error during signup' }); }
 });
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const user = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $1', [req.body.unique_id]);
@@ -109,9 +86,11 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/users/search', authenticateToken, async (req, res) => {
   try { res.status(200).json((await db.query(`SELECT unique_id, username, bio, is_verified FROM users WHERE unique_id ILIKE $1 AND unique_id != $2 AND unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $2) AND unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $2) LIMIT 10`, [`%${req.query.query}%`, req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error searching' }); }
 });
+
 app.get('/api/users/me/stats', authenticateToken, async (req, res) => {
   try { res.status(200).json({ friendsCount: parseInt((await db.query(`SELECT COUNT(DISTINCT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END) FROM friend_requests WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'`, [req.user.id])).rows[0].count) }); } catch (err) { res.status(500).json({ error: 'Error stats' }); }
 });
+
 app.put('/api/users/me/bio', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE users SET bio = $1 WHERE unique_id = $2`, [req.body.bio, req.user.id]); res.status(200).json({ message: 'Bio updated' }); } catch (err) { res.status(500).json({ error: 'Error updating bio' }); }
 });
@@ -121,6 +100,28 @@ app.put('/api/users/me/verify', authenticateToken, async (req, res) => {
     await db.query(`UPDATE users SET is_verified = TRUE WHERE unique_id = $1`, [req.user.id]);
     res.status(200).json({ message: 'Account verified successfully!' });
   } catch (err) { res.status(500).json({ error: 'Error verifying account' }); }
+});
+
+// MISSING PRIVACY UPDATE API
+app.put('/api/users/me/privacy', authenticateToken, async (req, res) => {
+  try {
+    if (req.body.hideLastSeen !== undefined) {
+      await db.query(`UPDATE users SET hide_last_seen = $1 WHERE unique_id = $2`, [req.body.hideLastSeen, req.user.id]);
+    }
+    if (req.body.hideOnlineStatus !== undefined) {
+      await db.query(`UPDATE users SET hide_online_status = $1 WHERE unique_id = $2`, [req.body.hideOnlineStatus, req.user.id]);
+      
+      // Instantly push offline status globally if hidden
+      if (req.body.hideOnlineStatus === true) {
+         io.emit('user_offline', { userId: req.user.id, lastSeen: new Date().toISOString() });
+      } else {
+         if (onlineUsers.has(req.user.id)) {
+            io.emit('user_online', req.user.id);
+         }
+      }
+    }
+    res.status(200).json({ message: 'Privacy updated' });
+  } catch (err) { res.status(500).json({ error: 'Error updating privacy' }); }
 });
 
 app.delete('/api/users/me', authenticateToken, async (req, res) => {
@@ -144,9 +145,11 @@ app.post('/api/users/block', authenticateToken, async (req, res) => {
     res.status(200).json({ message: 'User blocked successfully' });
   } catch (err) { res.status(500).json({ error: 'Error blocking user' }); }
 });
+
 app.get('/api/users/blocked', authenticateToken, async (req, res) => {
   try { res.status(200).json((await db.query(`SELECT b.blocked_id, u.username, u.is_verified FROM blocked_users b JOIN users u ON b.blocked_id = u.unique_id WHERE b.blocker_id = $1`, [req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching blocked users' }); }
 });
+
 app.delete('/api/users/unblock/:id', authenticateToken, async (req, res) => {
   try { await db.query(`DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2`, [req.user.id, req.params.id]); res.status(200).json({ message: 'User unblocked successfully' }); } catch (err) { res.status(500).json({ error: 'Error unblocking user' }); }
 });
@@ -159,9 +162,11 @@ app.get('/api/notifications/unread', authenticateToken, async (req, res) => {
     res.status(200).json({ unread: parseInt(fReqs.rows[0].count) + parseInt(notifs.rows[0].count) });
   } catch (err) { res.status(500).json({ error: 'Error counting notifications' }); }
 });
+
 app.put('/api/notifications/read', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE notifications SET is_read = TRUE WHERE user_id = $1 AND is_read = FALSE`, [req.user.id]); res.status(200).json({ message: 'Marked read' }); } catch (err) { res.status(500).json({ error: 'Error marking read' }); }
 });
+
 app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const fReqs = await db.query(`SELECT fr.id as ref_id, u.unique_id, u.username, u.is_verified, fr.created_at, 'friend_request' as type, FALSE as is_read, '' as content FROM friend_requests fr JOIN users u ON fr.sender_id = u.unique_id WHERE fr.receiver_id = $1 AND fr.status = 'pending'`, [req.user.id]);
@@ -169,6 +174,7 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
     res.status(200).json([...fReqs.rows, ...notifs.rows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
   } catch (err) { res.status(500).json({ error: 'Error fetching notifications' }); }
 });
+
 app.delete('/api/notifications/:id', authenticateToken, async (req, res) => {
   try { await db.query(`DELETE FROM notifications WHERE id = $1 AND user_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Notification deleted' }); } catch (err) { res.status(500).json({ error: 'Error deleting notification' }); }
 });
@@ -177,18 +183,22 @@ app.delete('/api/notifications/:id', authenticateToken, async (req, res) => {
 app.put('/api/friends/accept/:id', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE friend_requests SET status = 'accepted' WHERE id = $1 AND receiver_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Accepted' }); } catch (err) { res.status(500).json({ error: 'Error accepting' }); }
 });
+
 app.delete('/api/friends/reject/:id', authenticateToken, async (req, res) => {
   try { await db.query(`DELETE FROM friend_requests WHERE id = $1 AND (receiver_id = $2 OR sender_id = $2)`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } catch (err) { res.status(500).json({ error: 'Error rejecting' }); }
 });
+
 app.post('/api/friends/request', authenticateToken, async (req, res) => {
   try { await db.query(`INSERT INTO friend_requests (sender_id, receiver_id) VALUES ($1, $2)`, [req.user.id, req.body.receiver_id]); res.status(200).json({ message: 'Sent' }); } catch (err) { res.status(500).json({ error: 'Error sending' }); }
 });
+
 app.get('/api/friends/status/:otherUserId', authenticateToken, async (req, res) => {
   try {
     const result = await db.query(`SELECT id, status, sender_id FROM friend_requests WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`, [req.user.id, req.params.otherUserId]);
     res.status(200).json(result.rows.length > 0 ? result.rows[0] : { status: 'none' });
   } catch (err) { res.status(500).json({ error: 'Error status' }); }
 });
+
 app.get('/api/friends', authenticateToken, async (req, res) => {
   try {
     const query = `
@@ -207,7 +217,7 @@ app.get('/api/friends', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error fetching friends' }); }
 });
 
-// --- POSTS & COMMENTS (FIXED FOR PRIVACY) ---
+// --- POSTS & COMMENTS ---
 app.post('/api/posts', authenticateToken, async (req, res) => {
   try { 
     const newPost = await db.query(`INSERT INTO posts (user_id, content) VALUES ($1, $2) RETURNING *`, [req.user.id, req.body.content]);
@@ -218,7 +228,6 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error post' }); }
 });
 
-// FIX: Sirf Friends aur Khud ki posts dikhayega
 app.get('/api/posts', authenticateToken, async (req, res) => {
   try { 
     const query = `
@@ -239,7 +248,6 @@ app.get('/api/posts', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error fetching' }); }
 });
 
-// FIX: Dusri profile ki posts sirf tab dikhegi jab user accepted friend ho ya khud ho
 app.get('/api/posts/user/:id', authenticateToken, async (req, res) => {
   try { 
     const query = `
@@ -265,6 +273,7 @@ app.get('/api/posts/user/:id', authenticateToken, async (req, res) => {
 app.put('/api/posts/:id', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE posts SET content = $1 WHERE id = $2 AND user_id = $3`, [req.body.content, req.params.id, req.user.id]); res.status(200).json({ message: 'Updated' }); } catch (err) { res.status(500).json({ error: 'Error editing post' }); }
 });
+
 app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
   try { await db.query(`DELETE FROM posts WHERE id = $1 AND user_id = $2`, [req.params.id, req.user.id]); res.status(200).json({ message: 'Deleted' }); } catch (err) { res.status(500).json({ error: 'Error deleting' }); }
 });
@@ -286,6 +295,7 @@ app.post('/api/posts/:id/like', authenticateToken, async (req, res) => {
     }
   } catch (err) { res.status(500).json({ error: 'Error like' }); }
 });
+
 app.get('/api/posts/:id/likes', authenticateToken, async (req, res) => {
   try { res.status(200).json((await db.query(`SELECT u.unique_id, u.username, u.bio, u.is_verified FROM post_likes pl JOIN users u ON pl.user_id = u.unique_id WHERE pl.post_id = $1`, [req.params.id])).rows); } catch (err) { res.status(500).json({ error: 'Error fetching likes' }); }
 });
@@ -334,6 +344,7 @@ app.post('/api/comments/:id/like', authenticateToken, async (req, res) => {
     }
   } catch (err) { res.status(500).json({ error: 'Error liking comment' }); }
 });
+
 app.put('/api/comments/:id', authenticateToken, async (req, res) => {
   try {
     const result = await db.query(`UPDATE post_comments SET comment = $1 WHERE id = $2 AND user_id = $3 RETURNING *`, [req.body.comment, req.params.id, req.user.id]);
@@ -341,6 +352,7 @@ app.put('/api/comments/:id', authenticateToken, async (req, res) => {
     res.status(200).json({ message: 'Comment updated' });
   } catch (err) { res.status(500).json({ error: 'Error editing comment' }); }
 });
+
 app.delete('/api/comments/:id', authenticateToken, async (req, res) => {
   try {
     const check = await db.query(`SELECT c.user_id as comment_author, p.user_id as post_author FROM post_comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1`, [req.params.id]);
@@ -409,7 +421,6 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
 
 app.delete('/api/messages/forme/:id', authenticateToken, async (req, res) => {
   try { 
-    // Delete ki jagah array me id add kar denge taaki message hide ho jaye
     await db.query(`UPDATE messages SET deleted_by = array_append(deleted_by, $1) WHERE id = $2 AND (sender_id = $1 OR receiver_id = $1)`, [req.user.id, req.params.id]); 
     res.status(200).json({ message: 'Message deleted for you' }); 
   } catch (err) { res.status(500).json({ error: 'Error delete msg' }); }
@@ -417,7 +428,6 @@ app.delete('/api/messages/forme/:id', authenticateToken, async (req, res) => {
 
 app.delete('/api/chats/:otherUserId', authenticateToken, async (req, res) => {
   try { 
-    // Yaha bhi chat wipe nahi karenge, bas requester ki ID dal denge ki usne hide kiya hai
     await db.query(`UPDATE messages SET deleted_by = array_append(deleted_by, $1) WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)) AND NOT ($1 = ANY(deleted_by))`, [req.user.id, req.params.otherUserId]); 
     res.status(200).json({ message: 'Chat permanently cleared for you' }); 
   } catch (err) { res.status(500).json({ error: 'Error clear' }); }
@@ -432,9 +442,8 @@ io.on('connection', (socket) => {
     if (userId) {
       onlineUsers.set(userId, socket.id);
       socket.userId = userId;
-      
+
       try {
-        // FIX: Agar Online hide hai to broadcast mat karo
         const u = await db.query('SELECT hide_online_status FROM users WHERE unique_id = $1', [userId]);
         if (!u.rows[0]?.hide_online_status) {
            io.emit('user_online', userId);
@@ -447,9 +456,11 @@ io.on('connection', (socket) => {
 
         undelivered.rows.forEach(msg => {
           const senderSocketId = onlineUsers.get(msg.sender_id);
-          if (senderSocketId) io.to(senderSocketId).emit('message_updated', { id: msg.id, status: 'delivered' });
+          if (senderSocketId) {
+            io.to(senderSocketId).emit('message_updated', { id: msg.id, status: 'delivered' });
+          }
         });
-      } catch (err) { console.error(err); }
+      } catch (err) { console.error("Error updating delivery status on join:", err); }
     }
   });
 
@@ -468,12 +479,19 @@ io.on('connection', (socket) => {
             ) as rn
           FROM messages m
           WHERE (m.sender_id = $1 OR m.receiver_id = $1)
+          AND NOT ($1 = ANY(m.deleted_by))
           AND m.is_deleted_for_me = FALSE
         )
         SELECT 
-          u.unique_id, u.username, u.is_verified,
-          rm.content AS last_message, rm.created_at AS last_message_time,
-          rm.reaction, rm.sender_id, rm.is_deleted_for_everyone, rm.is_deleted_for_me,
+          u.unique_id, 
+          u.username,
+          u.is_verified,
+          rm.content AS last_message,
+          rm.created_at AS last_message_time,
+          rm.reaction,
+          rm.sender_id,
+          rm.is_deleted_for_everyone,
+          rm.is_deleted_for_me,
           (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read' AND is_deleted_for_me = FALSE) AS unread_count
         FROM RankedMessages rm
         JOIN users u ON u.unique_id = rm.other_user_id
@@ -484,11 +502,13 @@ io.on('connection', (socket) => {
       `;
       const result = await db.query(query, [userId]);
       socket.emit('sync_complete', result.rows);
-    } catch (err) {}
+    } catch (err) { console.error("Error syncing messages:", err); }
   });
 
   socket.on('change_chat_theme', ({ themeId, senderId, receiverId }) => {
-    if (onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('theme_updated', { themeId });
+    if (onlineUsers.get(receiverId)) {
+       io.to(onlineUsers.get(receiverId)).emit('theme_updated', { themeId });
+    }
   });
 
   socket.on('send_message', async (data) => {
@@ -507,15 +527,17 @@ io.on('connection', (socket) => {
       
       if (onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
       socket.emit('message_status', { tempId, realId: savedMsg.rows[0].id, status: initialStatus });
-    } catch (err) {}
+    } catch (err) { console.error(err); }
   });
 
   socket.on('react_message', async ({ messageId, reaction, receiverId }) => {
     try { await db.query(`UPDATE messages SET reaction = $1 WHERE id = $2`, [reaction, messageId]); if(onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('message_updated', { id: messageId, reaction }); } catch (err) {}
   });
+
   socket.on('delete_message_everyone', async ({ messageId, receiverId }) => {
     try { await db.query(`UPDATE messages SET is_deleted_for_everyone = TRUE, content = 'This message was deleted' WHERE id = $1`, [messageId]); if(onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('message_updated', { id: messageId, is_deleted_for_everyone: true, content: 'This message was deleted' }); } catch (err) {}
   });
+
   socket.on('mark_as_read', async ({ messageId, senderId }) => {
     try { await db.query(`UPDATE messages SET status = 'read' WHERE id = $1`, [messageId]); if(onlineUsers.get(senderId)) io.to(onlineUsers.get(senderId)).emit('message_updated', { id: messageId, status: 'read' }); } catch (err) {}
   });
@@ -524,13 +546,10 @@ io.on('connection', (socket) => {
     try {
       const u = await db.query(`SELECT last_seen, hide_last_seen, hide_online_status FROM users WHERE unique_id = $1`, [targetId]);
       if (u.rows.length > 0) {
-        // FIX 1: Agar online/typing status hidden hai, toh force Offline with Hidden Last Seen
         if (u.rows[0].hide_online_status) {
           socket.emit('companion_status_result', { targetId, isOnline: false, lastSeen: u.rows[0].hide_last_seen ? null : u.rows[0].last_seen });
           return;
         }
-        
-        // FIX 2: Normal check
         const isTargetOnline = onlineUsers.has(targetId);
         socket.emit('companion_status_result', { targetId, isOnline: isTargetOnline, lastSeen: (isTargetOnline || u.rows[0].hide_last_seen) ? null : u.rows[0].last_seen });
       }
@@ -543,7 +562,6 @@ io.on('connection', (socket) => {
       try {
         await db.query(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE unique_id = $1`, [socket.userId]);
         const u = await db.query('SELECT hide_online_status FROM users WHERE unique_id = $1', [socket.userId]);
-        // Disconnect par bhi check karo
         if (!u.rows[0]?.hide_online_status) {
            io.emit('user_offline', { userId: socket.userId, lastSeen: new Date().toISOString() }); 
         }
