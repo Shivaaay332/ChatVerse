@@ -1,12 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo, useCallback } from 'react';
 import { Heart, MessageCircle, Send, MoreVertical, Trash2, Edit3, Copy, Image as ImageIcon, X, BadgeCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
 import { io } from 'socket.io-client';
 import { SOCKET_URL } from '../api';
-// NAYA IMPORT
-import { useState, useEffect, useRef, memo, useCallback } from 'react';
 
 const timeAgo = (dateString) => {
   if (!dateString) return 'Just now';
@@ -24,7 +22,7 @@ const timeAgo = (dateString) => {
   return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 };
 
-// UNIVERSAL POST COMPONENT
+// UNIVERSAL POST COMPONENT (Memoized for 0-Lag)
 export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = false, onClose }) => {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { unique_id: '' };
@@ -52,9 +50,8 @@ export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = fals
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
 
-  // FIX: Smart Navigation (Khud ki profile par click kiya toh seedha "My Profile" open hogi)
   const handleProfileClick = (id, username) => {
-    if (onClose) onClose(); // Close modal if navigating
+    if (onClose) onClose();
     if (id === currentUser.unique_id) {
       navigate('/profile');
     } else {
@@ -243,7 +240,6 @@ export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = fals
         
         {/* MENU */}
         <div className="relative flex items-center gap-1">
-          {/* 3-Dot Button */}
           <button 
             onClick={() => setShowMenu(!showMenu)} 
             className="text-gray-400 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors relative z-[60]"
@@ -257,39 +253,25 @@ export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = fals
             </button>
           )}
 
-          {/* FIX: INVISIBLE OVERLAY TO CLOSE MENU WHEN CLICKING OUTSIDE */}
           {showMenu && (
             <div 
               className="fixed inset-0 z-[50]" 
-              onClick={(e) => { 
-                e.stopPropagation(); 
-                setShowMenu(false); 
-              }}
+              onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
             ></div>
           )}
 
-          {/* DROPDOWN MENU */}
           {showMenu && (
             <div className="absolute right-0 top-10 w-44 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[60] animate-slide-up">
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleCopy(); }} 
-                className="w-full text-left px-4 py-3.5 text-[14px] text-gray-700 dark:text-gray-200 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 font-bold transition-colors"
-              >
+              <button onClick={(e) => { e.stopPropagation(); handleCopy(); }} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-700 dark:text-gray-200 flex items-center gap-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 font-bold transition-colors">
                 <Copy className="w-[18px] h-[18px]"/> Copy Text
               </button>
               
               {isMyPost && (
                 <>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setIsEditing(true); setShowMenu(false); }} 
-                    className="w-full text-left px-4 py-3.5 text-[14px] text-indigo-600 dark:text-indigo-400 flex items-center gap-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700"
-                  >
+                  <button onClick={(e) => { e.stopPropagation(); setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-3.5 text-[14px] text-indigo-600 dark:text-indigo-400 flex items-center gap-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700">
                     <Edit3 className="w-[18px] h-[18px]"/> Edit Post
                   </button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} 
-                    className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-2.5 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700"
-                  >
+                  <button onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-2.5 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-50 dark:border-gray-700">
                     <Trash2 className="w-[18px] h-[18px]"/> Delete Post
                   </button>
                 </>
@@ -410,14 +392,14 @@ export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = fals
       )}
     </div>
   );
-};
+});
 
 export default function HomeFeed() {
   const [posts, setPosts] = useState(() => {
     const cached = localStorage.getItem('chatverse_cached_posts');
     return cached ? JSON.parse(cached) : [];
   });
-  // Agar cache me data hai, toh loading screen kabhi nahi aayegi
+  
   const [loading, setLoading] = useState(posts.length === 0);
   const [newPost, setNewPost] = useState('');
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { username: 'Me' };
@@ -426,7 +408,7 @@ export default function HomeFeed() {
     try {
       const res = await api.get('/posts');
       setPosts(res.data);
-      localStorage.setItem('chatverse_cached_posts', JSON.stringify(res.data)); // Background Cache Update
+      localStorage.setItem('chatverse_cached_posts', JSON.stringify(res.data));
     } catch (err) {
       console.error("Failed to fetch posts");
     } finally {
@@ -437,7 +419,6 @@ export default function HomeFeed() {
   useEffect(() => { 
     fetchPosts(); 
     
-    // FIX: Silent connection on Home Feed (Without disconnecting!)
     const feedSocket = io(SOCKET_URL);
     if (currentUser.unique_id) {
       feedSocket.emit('join', currentUser.unique_id);
@@ -456,7 +437,7 @@ export default function HomeFeed() {
   const updateLocalPost = useCallback((id, newContent) => { 
     setPosts(prevPosts => prevPosts.map(p => p.id === id ? { ...p, content: newContent } : p)); 
   }, []);
-
+  
   const removeLocalPost = useCallback((id) => { 
     setPosts(prevPosts => prevPosts.filter(p => p.id !== id)); 
   }, []);

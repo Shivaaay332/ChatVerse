@@ -1,10 +1,10 @@
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, Loader, MessageSquare, ChevronRight, Star, ArrowLeft, BadgeCheck, Trash2, UserPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
 import { SOCKET_URL } from '../api';
-import { useState, useEffect, useRef, useMemo } from 'react';
 
 const formatTime = (dateString) => {
   if (!dateString) return '';
@@ -26,7 +26,6 @@ export default function ChatList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   
-  // Naya Code: App khulte hi pehle cache check karega, agar data hai to turant dikhayega
   const [recentChats, setRecentChats] = useState(() => {
     const cached = localStorage.getItem('chatverse_cached_recentChats');
     return cached ? JSON.parse(cached) : [];
@@ -37,19 +36,14 @@ export default function ChatList() {
     return cached ? JSON.parse(cached) : [];
   });
   
-  // Agar cache me data nahi hai tabhi loading true hogi warna false
   const [loading, setLoading] = useState(recentChats.length === 0);
-
   const searchInputRef = useRef(null);
-
   const [typingUsers, setTypingUsers] = useState({});
   const typingTimeouts = useRef({});
 
-  // Friends Modal states (kept intact for safety/future use)
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
 
-  // LONG PRESS DELETE STATES & REFS
   const [longPressedChat, setLongPressedChat] = useState(null);
   const pressTimer = useRef(null);
   const longPressTriggered = useRef(false);
@@ -57,12 +51,10 @@ export default function ChatList() {
 
   const fetchChatsAndFriends = async () => {
     try {
-      // 1. Pehle recent chats mangwao aur Cache me save karo
       const chatRes = await api.get('/chats/recent');
       setRecentChats(chatRes.data);
       localStorage.setItem('chatverse_cached_recentChats', JSON.stringify(chatRes.data)); 
       
-      // 2. Fir friends list mangwao aur Cache me save karo
       const friendRes = await api.get('/friends');
       setFriendsList(friendRes.data);
       localStorage.setItem('chatverse_cached_friendsList', JSON.stringify(friendRes.data)); 
@@ -114,21 +106,19 @@ export default function ChatList() {
     return () => clearTimeout(delay);
   }, [searchQuery]);
 
-  // LONG PRESS LOGIC (WhatsApp Style)
   const handlePointerDown = (e, chat) => {
     longPressTriggered.current = false;
     touchStartPos.current = { x: e.clientX, y: e.clientY };
     pressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
       setLongPressedChat(chat);
-      if (window.navigator?.vibrate) window.navigator.vibrate(50); // Haptic feedback on long press
+      if (window.navigator?.vibrate) window.navigator.vibrate(50);
     }, 500); 
   };
 
   const handlePointerMove = (e) => {
     const dx = Math.abs(e.clientX - touchStartPos.current.x);
     const dy = Math.abs(e.clientY - touchStartPos.current.y);
-    // If finger moves more than 10px, cancel the long press
     if ((dx > 10 || dy > 10) && pressTimer.current) {
       clearTimeout(pressTimer.current);
     }
@@ -141,12 +131,11 @@ export default function ChatList() {
   const handleChatClick = (e, chat) => {
     if (longPressTriggered.current) {
       longPressTriggered.current = false;
-      return; // Do not open chat if we just finished a long press
+      return; 
     }
     navigate(`/chat/${chat.unique_id}`, { state: { name: chat.username, id: chat.unique_id } });
   };
 
-  // ACTUAL DELETE FUNCTION (Runs from Modal)
   const confirmDeleteChat = async () => {
     if (!longPressedChat) return;
     try {
@@ -166,17 +155,17 @@ export default function ChatList() {
       if (!isAFav && isBFav) return 1;
       return 0; 
     });
-  }, [recentChats]); // Dependency: Sirf tab chale jab recentChats badle
+  }, [recentChats]);
 
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
       
       <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl pt-[calc(env(safe-area-inset-top)+16px)] pb-3 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-6 px-4">
           <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Messages</h1>
         </div>
-        <div className="relative">
-          <Search className="absolute left-4 top-3.5 text-gray-400 dark:text-gray-500 w-5 h-5" />
+        <div className="relative px-4">
+          <Search className="absolute left-8 top-3.5 text-gray-400 dark:text-gray-500 w-5 h-5" />
           <input 
             ref={searchInputRef}
             type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
@@ -202,7 +191,6 @@ export default function ChatList() {
         ) : searchQuery.length > 0 ? (
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 overflow-hidden mt-2">
              <div className="px-5 py-3 text-[11px] font-black text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Search Results</div>
-             {/* FIX 3a: Search results ko useMemo me lock kiya for instant rendering */}
              {useMemo(() => (
                searchResults.length > 0 ? searchResults.map((user) => (
                 <div key={user.unique_id} onClick={() => navigate(`/user/${user.unique_id}`, { state: { user } })} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-50 dark:border-gray-700 transition-colors">
@@ -224,7 +212,6 @@ export default function ChatList() {
           </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 mt-2 overflow-hidden">
-            {/* FIX 3b: Processed Chats ko memory me lock kar diya */}
             {useMemo(() => (
               processedChats.length > 0 ? processedChats.map((user) => {
                 const hasStar = localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true';
@@ -250,56 +237,55 @@ export default function ChatList() {
                     onClick={(e) => handleChatClick(e, user)}
                     className={`group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-all active:scale-[0.98] active:opacity-70 border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''} ${longPressedChat?.unique_id === user.unique_id ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
                   >
-                  
-                  <div className="w-11 h-11 shrink-0 relative pointer-events-none">
-                    <div className="w-10 h-10 bg-gradient-to-tr from-chatverse to-purple-500 p-[2px] rounded-full shadow-sm">
-                      <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-chatverse dark:text-indigo-400 font-bold text-lg uppercase">{user.username.charAt(0)}</div>
-                    </div>
-                    {hasStar && (
-                      <div className="absolute -bottom-1 right-0 bg-yellow-400 p-[3px] rounded-full border border-white dark:border-gray-800">
-                        <Star className="w-[10px] h-[10px] text-white fill-white" />
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="flex-1 min-w-0 pr-1 pointer-events-none">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                         <h3 className={`text-[16px] truncate flex items-center ${isUnread ? 'font-bold text-gray-900 dark:text-white' : 'font-bold text-gray-900 dark:text-gray-100'}`}>
-                           {user.username}
-                           {user.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
-                         </h3>
-                         {hasStar && <span className="text-[9px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-[4px] leading-none tracking-wide">PINNED</span>}
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[11.5px] whitespace-nowrap ${isUnread ? 'font-bold text-chatverse dark:text-indigo-400' : 'font-medium text-gray-400 dark:text-gray-500'}`}>
-                           {formatTime(user.last_message_time)}
-                        </span>
-                      </div>
-                    </div>
                     
-                    <div className="flex items-center justify-between mt-0.5">
-                      <p className={`text-[14px] truncate max-w-[210px] ${isUnread ? 'font-bold text-gray-800 dark:text-gray-200' : 'font-medium text-gray-500 dark:text-gray-400'}`}>
-                        {typingUsers[user.unique_id] ? (
-                          <span className="font-bold text-[#4ADE80] italic">typing...</span>
-                        ) : (
-                          previewText
-                        )}
-                      </p>
-                      
-                      {isUnread && (
-                        <div className="w-[20px] h-[20px] bg-chatverse text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-sm shrink-0 mt-0.5">
-                          {user.unread_count > 9 ? '9+' : user.unread_count}
+                    <div className="w-11 h-11 shrink-0 relative pointer-events-none">
+                      <div className="w-10 h-10 bg-gradient-to-tr from-chatverse to-purple-500 p-[2px] rounded-full shadow-sm">
+                        <div className="w-full h-full bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-chatverse dark:text-indigo-400 font-bold text-lg uppercase">{user.username.charAt(0)}</div>
+                      </div>
+                      {hasStar && (
+                        <div className="absolute -bottom-1 right-0 bg-yellow-400 p-[3px] rounded-full border border-white dark:border-gray-800">
+                          <Star className="w-[10px] h-[10px] text-white fill-white" />
                         </div>
                       )}
                     </div>
+                    
+                    <div className="flex-1 min-w-0 pr-1 pointer-events-none">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                           <h3 className={`text-[16px] truncate flex items-center ${isUnread ? 'font-bold text-gray-900 dark:text-white' : 'font-bold text-gray-900 dark:text-gray-100'}`}>
+                             {user.username}
+                             {user.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
+                           </h3>
+                           {hasStar && <span className="text-[9px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-[4px] leading-none tracking-wide">PINNED</span>}
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11.5px] whitespace-nowrap ${isUnread ? 'font-bold text-chatverse dark:text-indigo-400' : 'font-medium text-gray-400 dark:text-gray-500'}`}>
+                             {formatTime(user.last_message_time)}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between mt-0.5">
+                        <p className={`text-[14px] truncate max-w-[210px] ${isUnread ? 'font-bold text-gray-800 dark:text-gray-200' : 'font-medium text-gray-500 dark:text-gray-400'}`}>
+                          {typingUsers[user.unique_id] ? (
+                            <span className="font-bold text-[#4ADE80] italic">typing...</span>
+                          ) : (
+                            previewText
+                          )}
+                        </p>
+                        
+                        {isUnread && (
+                          <div className="w-[20px] h-[20px] bg-chatverse text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-sm shrink-0 mt-0.5">
+                            {user.unread_count > 9 ? '9+' : user.unread_count}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-
-                </div>
-              );
-            }) : (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-center">
+                );
+              }) : (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-center">
                   <div className="w-16 h-16 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3"><MessageSquare className="w-7 h-7 text-gray-300 dark:text-gray-500" /></div>
                   <h3 className="text-gray-700 dark:text-gray-300 font-bold text-[16px] mb-1">No chats yet</h3>
                   <p className="text-[13px] text-gray-500 font-medium">Search for friends to start.</p>
@@ -308,8 +294,8 @@ export default function ChatList() {
             ), [processedChats, typingUsers, longPressedChat, currentUser.unique_id])}
           </div>
         )}
+      </div>
 
-      {/* LONG PRESS DELETE MODAL (WhatsApp Style Action Menu) */}
       {longPressedChat && (
         <div className="absolute inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={() => setLongPressedChat(null)}>
           <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-[24px] p-5 shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
@@ -323,16 +309,10 @@ export default function ChatList() {
               </p>
             </div>
             <div className="flex flex-col gap-3">
-              <button 
-                onClick={confirmDeleteChat}
-                className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 rounded-xl transition-colors shadow-sm"
-              >
+              <button onClick={confirmDeleteChat} className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 rounded-xl transition-colors shadow-sm">
                 Yes, Delete Chat
               </button>
-              <button 
-                onClick={() => setLongPressedChat(null)}
-                className="w-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white font-bold py-3.5 rounded-xl transition-colors"
-              >
+              <button onClick={() => setLongPressedChat(null)} className="w-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white font-bold py-3.5 rounded-xl transition-colors">
                 Cancel
               </button>
             </div>
@@ -353,10 +333,7 @@ export default function ChatList() {
           </div>
 
           <div className="flex-1 overflow-y-auto no-scrollbar">
-             <div 
-               onClick={() => { setShowFriendsModal(false); setTimeout(() => searchInputRef.current?.focus(), 100); }}
-               className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer border-b border-gray-100 dark:border-gray-700/50 bg-white dark:bg-gray-800 transition-colors"
-             >
+             <div onClick={() => { setShowFriendsModal(false); setTimeout(() => searchInputRef.current?.focus(), 100); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer border-b border-gray-100 dark:border-gray-700/50 bg-white dark:bg-gray-800 transition-colors">
                 <div className="w-10 h-10 bg-indigo-50 dark:bg-gray-700 rounded-full flex items-center justify-center text-chatverse dark:text-indigo-400">
                    <UserPlus className="w-6 h-6" />
                 </div>
@@ -374,11 +351,7 @@ export default function ChatList() {
              ) : (
                <div className="bg-white dark:bg-gray-800 border-y border-gray-100 dark:border-gray-700">
                  {friendsList.map(friend => (
-                   <div 
-                     key={friend.unique_id} 
-                     onClick={() => { setShowFriendsModal(false); navigate(`/chat/${friend.unique_id}`, { state: { name: friend.username, id: friend.unique_id } }) }} 
-                     className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer border-b border-gray-50 dark:border-gray-700 last:border-0 transition-colors"
-                   >
+                   <div key={friend.unique_id} onClick={() => { setShowFriendsModal(false); navigate(`/chat/${friend.unique_id}`, { state: { name: friend.username, id: friend.unique_id } }) }} className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer border-b border-gray-50 dark:border-gray-700 last:border-0 transition-colors">
                       <div className="w-10 h-10 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">
                          {friend.username.charAt(0)}
                       </div>
