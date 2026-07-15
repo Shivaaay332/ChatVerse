@@ -108,7 +108,7 @@ function App() {
     return outputArray;
   };
 
-  // Main Authentication & Push Setup
+  // Main Authentication & Push Setup (100% FIX)
   useEffect(() => {
     if (!isAuthenticated) return;
     
@@ -116,30 +116,51 @@ function App() {
     const globalSocket = io(SOCKET_URL);
     globalSocket.emit('join', user?.unique_id);
 
-    // IN-APP SOUND (Jab tum app chala rahe ho)
+    // 1. IN-APP SOUND & POPUP (Jab tum app me kisi bhi page par ho)
     globalSocket.on('receive_message', (msg) => {
+      // Agar current chat me ho to notification mat do
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
+      
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
       try { new Audio(`/sounds/${defaultTone}.mp3`).play(); } catch (e) {}
+
+      // Kisi bhi aur page par hone par screen par popup dikhayega
+      if (Notification.permission === 'granted' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(registration => {
+          registration.showNotification(msg.username || "New Message", {
+            body: msg.content || "Sent you a message",
+            icon: "/logo.png",
+            badge: "/logo.png",
+            vibrate: [200, 100, 200],
+            requireInteraction: true,
+            data: { url: `/chat/${msg.sender_id}` }
+          });
+        });
+      }
     });
 
-    // BACKGROUND WEB PUSH REGISTRATION
+    // 2. FORCE RE-SUBSCRIBE WEB PUSH (Yahi hai Double Tick & Background Popup ka secret)
     const subscribeUserToPush = async () => {
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         try {
           const registration = await navigator.serviceWorker.ready;
-          let subscription = await registration.pushManager.getSubscription();
           
-          if (!subscription) {
-             const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeZ1TANY_lr2vrQQlQriTAjZ-dLZG2F2gGkQGzS1tW32MvM9gNf0';
-             subscription = await registration.pushManager.subscribe({
-               userVisibleOnly: true,
-               applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
-             });
+          // FIX: Purana kharab token hatao (Unsubscribe)
+          let oldSubscription = await registration.pushManager.getSubscription();
+          if (oldSubscription) {
+            await oldSubscription.unsubscribe();
           }
-          // Server pe subscription bhej do
-          await api.post('/notifications/subscribe', subscription);
-        } catch(err) { console.log('Push subscription failed:', err); }
+          
+          // FIX: Naya fresh token generate karo
+          const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeZ1TANY_lr2vrQQlQriTAjZ-dLZG2F2gGkQGzS1tW32MvM9gNf0';
+          const newSubscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
+          });
+          
+          // Backend ko ye fresh token do, jisse Push kabhi fail na ho!
+          await api.post('/notifications/subscribe', newSubscription);
+        } catch(err) { console.log('Push setup failed:', err); }
       }
     };
 

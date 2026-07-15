@@ -1,14 +1,12 @@
-// frontend/public/sw.js
-
 self.addEventListener('push', function(event) {
   if (!event.data) return;
-  
   const data = event.data.json();
+  
   const options = {
     body: data.body,
     icon: data.icon || '/logo.png',
     badge: '/logo.png',
-    vibrate: [200, 100, 200, 100, 200], // Phone Vibrate karega
+    vibrate: [300, 100, 300, 100, 300], // Strong Vibration for WhatsApp feel
     data: { url: data.url || '/' },
     requireInteraction: true // Screen pe ruka rahega
   };
@@ -17,7 +15,7 @@ self.addEventListener('push', function(event) {
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
       let isFocused = false;
       
-      // Check karo ki kya app screen par khuli hai?
+      // Check karo ki kya app abhi screen par chalu (focused) hai?
       for (let client of windowClients) {
         if (client.focused) {
           isFocused = true;
@@ -25,7 +23,7 @@ self.addEventListener('push', function(event) {
         }
       }
 
-      // AGAR APP BAND HAI YA PHONE LOCKED HAI, TABHI POPUP DIKHAO
+      // AGAR APP BAND HAI YA PHONE LOCKED HAI, TABHI POPUP & RED DOT DIKHAO
       if (!isFocused) {
         if ('setAppBadge' in navigator) navigator.setAppBadge(1).catch(() => {});
         return self.registration.showNotification(data.title, options);
@@ -50,7 +48,6 @@ self.addEventListener('notificationclick', function(event) {
   );
 });
 
-// Update & Activation setup
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
