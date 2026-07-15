@@ -65,23 +65,26 @@ export default function ChatScreen() {
 
     newSocket.emit('check_companion_status', { targetId: receiverId });
 
+    // 👇 CHATSCREEN KI API FETCH KO ISSE REPLACE KARO 👇
     api.get(`/messages/${receiverId}`).then(res => {
       const fetchedMessages = res.data;
       setMessages(fetchedMessages);
 
+      // Chat open hote hi seedha bottom par scroll karo
       setTimeout(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 100);
 
+      // PERFECT SEEN FIX: Jab tum chat kholo, toh samne wale ko ek sath bulk "Blue Tick" bhej do
       if (!hideReadReceipts) {
-        const unreadMsgs = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
-        if (unreadMsgs.length > 0) {
+        const unreadExists = fetchedMessages.some(m => m.sender_id === receiverId && m.status !== 'read');
+        if (unreadExists) {
+          // Local screen pe instantly read dikhao
           setMessages(prev => prev.map(m => 
             (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
           ));
-          unreadMsgs.forEach(msg => {
-            newSocket.emit('mark_as_read', { messageId: msg.id, senderId: receiverId });
-          });
+          // Backend aur samne wale ko real-time signal bhejo
+          newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
         }
       }
     }).catch(err => console.log(err));
@@ -153,6 +156,19 @@ export default function ChatScreen() {
       }
     });
 
+    // 👇 YE LISTENER SOCKET EVENTS KE SATH ADD KARNA HAI 👇
+    // PERFECT SEEN FIX: Jab samne wala tumhari chat open kare toh Instant Blue Ticks lagao
+    newSocket.on('messages_read_bulk', ({ readerId }) => {
+      if (readerId === receiverId) {
+        setMessages(prev => prev.map(msg => 
+          // Tumhare bheje gaye saare sent/delivered messages ko 'read' (Blue tick) kar do
+          (msg.sender_id === currentUser.unique_id && msg.status !== 'read') 
+            ? { ...msg, status: 'read' } 
+            : msg
+        ));
+      }
+    });
+
     newSocket.on('message_status', ({ tempId, status, realId }) => {
       setMessages((prev) => prev.map(msg => msg.tempId === tempId ? { ...msg, status, id: realId } : msg));
     });
@@ -176,6 +192,7 @@ export default function ChatScreen() {
       newSocket.off('message_status');
       newSocket.off('message_updated');
       newSocket.off('theme_updated');
+      newSocket.off('messages_read_bulk');
     };
   }, [receiverId, currentUser.unique_id, hideReadReceipts, isMuted]);
     

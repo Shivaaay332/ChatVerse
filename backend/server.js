@@ -611,6 +611,20 @@ io.on('connection', (socket) => {
     try { await db.query(`UPDATE messages SET status = 'read' WHERE id = $1`, [messageId]); if(onlineUsers.get(senderId)) io.to(onlineUsers.get(senderId)).emit('message_updated', { id: messageId, status: 'read' }); } catch (err) {}
   });
 
+  // 👇 YE NAYA EVENT ADD KARNA HAI 👇
+  // PERFECT SEEN FIX: Ek sath saare blue ticks update karne ka logic
+  socket.on('mark_chat_read', async ({ senderId, receiverId }) => {
+    try {
+      // Pehle Database me 'read' mark karo
+      await db.query(`UPDATE messages SET status = 'read' WHERE sender_id = $1 AND receiver_id = $2 AND status != 'read'`, [senderId, receiverId]);
+      
+      // Jaise hi samne wala chat khole, Sender ko instantly 'Blue Ticks' bhej do
+      if (onlineUsers.get(senderId)) {
+        io.to(onlineUsers.get(senderId)).emit('messages_read_bulk', { readerId: receiverId });
+      }
+    } catch (err) { console.error("Error in bulk read:", err); }
+  });
+
   socket.on('check_companion_status', async ({ targetId }) => {
     try {
       const u = await db.query(`SELECT last_seen, hide_last_seen, hide_online_status FROM users WHERE unique_id = $1`, [targetId]);
