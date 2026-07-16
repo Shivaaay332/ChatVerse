@@ -58,6 +58,9 @@ export default function ChatScreen() {
 
   const [viewportHeight, setViewportHeight] = useState('100dvh');
 
+  // ==============================================================
+  // MAIN SOCKET & CHAT LOGIC (100% Fixed - No Hook Errors)
+  // ==============================================================
   useEffect(() => {
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
@@ -65,25 +68,21 @@ export default function ChatScreen() {
 
     newSocket.emit('check_companion_status', { targetId: receiverId });
 
-    // 👇 CHATSCREEN KI API FETCH KO ISSE REPLACE KARO 👇
+    // 1. Fetch Purani Chat aur Instant Blue Ticks
     api.get(`/messages/${receiverId}`).then(res => {
       const fetchedMessages = res.data;
       setMessages(fetchedMessages);
 
-      // Chat open hote hi seedha bottom par scroll karo
       setTimeout(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 100);
 
-      // PERFECT SEEN FIX: Jab tum chat kholo, toh samne wale ko ek sath bulk "Blue Tick" bhej do
       if (!hideReadReceipts) {
         const unreadExists = fetchedMessages.some(m => m.sender_id === receiverId && m.status !== 'read');
         if (unreadExists) {
-          // Local screen pe instantly read dikhao
           setMessages(prev => prev.map(m => 
             (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
           ));
-          // Backend aur samne wale ko real-time signal bhejo
           newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
         }
       }
@@ -108,37 +107,33 @@ export default function ChatScreen() {
       }
     });
 
-    newSocket.on('receive_message', (newMsg) => {
-      if (newMsg.sender_id === receiverId) {
+    // 2. 🔥 INSTANT LIVE MESSAGE (Bina atke scroll hoga) 🔥
+    const handleReceiveMessage = (msg) => {
+      if (msg.sender_id === receiverId || msg.receiver_id === receiverId) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
         
-        setIsTyping(false);
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
-        const readMsg = { ...newMsg, status: 'read' };
-        setMessages((prev) => [...prev, readMsg]);
-        
-        newSocket.emit('check_companion_status', { targetId: receiverId });
-        
-        if (!isMuted) {
-          try {
-            const customTone = localStorage.getItem(`cv_sound_${receiverId}`);
-            const globalTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
-            const toneToPlay = (customTone && customTone !== 'default') ? customTone : globalTone;
-            const audio = new Audio(`/sounds/${toneToPlay}.mp3`);
-            audio.volume = 0.5;
-            audio.play();
-          } catch(e){}
-        }
-
         if (!hideReadReceipts) {
-          newSocket.emit('mark_as_read', { messageId: newMsg.id, senderId: receiverId });
+          newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
         }
+        
+        setTimeout(() => {
+          endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 50); 
+      }
+    };
+    newSocket.on('receive_message', handleReceiveMessage);
 
-        if (!isScrolledUpRef.current) {
-          setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-        } else {
-          setNewMsgBadge(true); 
-        }
+    // 3. SAMNE WALE NE PADH LIYA -> INSTANT BLUE TICKS
+    newSocket.on('messages_read_bulk', ({ readerId }) => {
+      if (readerId === receiverId) {
+        setMessages(prev => prev.map(msg => 
+          (msg.sender_id === currentUser.unique_id && msg.status !== 'read') 
+            ? { ...msg, status: 'read' } 
+            : msg
+        ));
       }
     });
 
@@ -156,19 +151,6 @@ export default function ChatScreen() {
       }
     });
 
-    // 👇 YE LISTENER SOCKET EVENTS KE SATH ADD KARNA HAI 👇
-    // PERFECT SEEN FIX: Jab samne wala tumhari chat open kare toh Instant Blue Ticks lagao
-    newSocket.on('messages_read_bulk', ({ readerId }) => {
-      if (readerId === receiverId) {
-        setMessages(prev => prev.map(msg => 
-          // Tumhare bheje gaye saare sent/delivered messages ko 'read' (Blue tick) kar do
-          (msg.sender_id === currentUser.unique_id && msg.status !== 'read') 
-            ? { ...msg, status: 'read' } 
-            : msg
-        ));
-      }
-    });
-
     newSocket.on('message_status', ({ tempId, status, realId }) => {
       setMessages((prev) => prev.map(msg => msg.tempId === tempId ? { ...msg, status, id: realId } : msg));
     });
@@ -182,17 +164,19 @@ export default function ChatScreen() {
       localStorage.setItem(`cv_theme_${receiverId}`, themeId);
     });
 
+    // 4. CLEANUP FUNCTION (Memory leak rokne ke liye)
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       newSocket.off('companion_status_result');
       newSocket.off('user_online');
       newSocket.off('user_offline');
-      newSocket.off('receive_message');
+      newSocket.off('receive_message', handleReceiveMessage);
+      newSocket.off('messages_read_bulk');
       newSocket.off('typing');
       newSocket.off('message_status');
       newSocket.off('message_updated');
       newSocket.off('theme_updated');
-      newSocket.off('messages_read_bulk');
+      newSocket.disconnect();
     };
   }, [receiverId, currentUser.unique_id, hideReadReceipts, isMuted]);
     
@@ -480,6 +464,18 @@ export default function ChatScreen() {
     return visibleMessages.filter(m => m.sender_id === receiverId && m.status !== 'read').length;
   }, [visibleMessages, receiverId]);
 
+  const renderedEmojis = useMemo(() => {
+    return chatEmojis.map((e, index) => (
+      <button 
+        key={index} 
+        onClick={() => setMessage(prev => prev + e)} 
+        className="text-[26px] hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center justify-center p-1.5 active:scale-95"
+      >
+        {e}
+      </button>
+    ));
+  }, []); // Emojis ek baar load honge aur hamesha instant chalenge
+
   return (
     <div 
       className={`w-full flex flex-col relative transition-colors overflow-hidden ${getThemeClasses()}`} 
@@ -588,7 +584,7 @@ export default function ChatScreen() {
         onScroll={handleScroll}
       >
         {/* FIX: useMemo se saare messages lock ho jayenge, type karne pe lag 0 ho jayega */}
-        {useMemo(() => messages.map((msg, index) => {
+        {messages.map((msg, index) => {
 
           const isMe = msg.sender_id === currentUser.unique_id;
           const hasReaction = !!msg.reaction;
@@ -773,7 +769,7 @@ export default function ChatScreen() {
               </div>
             </div>
           );
-        }), [messages, selectedMessages, activeReactId, swipingId, chatTheme, currentUser.unique_id, receiverId])}
+        })}
 
         {isTyping && (
           <div className="self-start max-w-[75%] mt-2 mb-2">
@@ -811,21 +807,13 @@ export default function ChatScreen() {
           </div>
         )}
 
+        {/* NAYA EMOJI RENDER CODE */}
         {showEmojiPicker && (
           <div 
             onClick={(e) => e.stopPropagation()} 
             className="absolute bottom-[70px] left-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 shadow-2xl rounded-[20px] p-3 grid grid-cols-7 gap-1 z-50 w-80 h-72 overflow-y-auto no-scrollbar animate-slide-up"
           >
-            {/* FIX: Emojis sirf ek baar memory me load honge, fir hamesha instant khulenge */}
-            {useMemo(() => chatEmojis.map((e, index) => (
-              <button 
-                key={index} 
-                onClick={() => setMessage(prev => prev + e)} 
-                className="text-[26px] hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center justify-center p-1.5 active:scale-95"
-              >
-                {e}
-              </button>
-            )), [])}
+            {renderedEmojis}
           </div>
         )}
 
