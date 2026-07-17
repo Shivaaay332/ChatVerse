@@ -20,6 +20,10 @@ export default function ChatScreen() {
   const isMuted = localStorage.getItem(`cv_mute_${receiverId}`) === 'true';
   const hasCustomPrivacy = localStorage.getItem(`cv_privacy_${receiverId}`) === 'true';
 
+  // FIX: Socket reconnect rokne ke liye isMuted ko ref me store kiya
+  const isMutedRef = useRef(isMuted);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+
   const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showSoundModal, setShowSoundModal] = useState(false);
@@ -46,7 +50,12 @@ export default function ChatScreen() {
   
   const [swipingId, setSwipingId] = useState(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
-  const swipeStartRef = useRef({ x: 0, y: 0 });
+  
+  // FIX: Multi-touch break rokne ke liye pointerId track kiya
+  const swipeStartRef = useRef({ x: 0, y: 0, pointerId: null });
+
+  // FIX: Unread messages state taki navbar se chat open karne pe wo gayab na ho
+  const [initialUnread, setInitialUnread] = useState({ count: 0, firstId: null });
 
   const endOfMessagesRef = useRef(null);
   const typingTimeoutRef = useRef(null); 
@@ -59,32 +68,38 @@ export default function ChatScreen() {
   const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   // ==============================================================
-  // MAIN SOCKET & CHAT LOGIC (100% Fixed - No Hook Errors)
+  // MAIN SOCKET & CHAT LOGIC
   // ==============================================================
   useEffect(() => {
+    let isMounted = true; // FIX: Memory leak prevent karne ke liye flag
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
     newSocket.emit('join', currentUser.unique_id);
 
     newSocket.emit('check_companion_status', { targetId: receiverId });
 
-    // 1. Fetch Purani Chat aur Instant Blue Ticks
     api.get(`/messages/${receiverId}`).then(res => {
+      if (!isMounted) return; 
+      
       const fetchedMessages = res.data;
+
+      // FIX: Database me mark-read hone se pehle unreads nikalo
+      const unreads = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
+      if (unreads.length > 0) {
+        setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
+      }
+
       setMessages(fetchedMessages);
 
       setTimeout(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 100);
 
-      if (!hideReadReceipts) {
-        const unreadExists = fetchedMessages.some(m => m.sender_id === receiverId && m.status !== 'read');
-        if (unreadExists) {
-          setMessages(prev => prev.map(m => 
-            (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
-          ));
-          newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
-        }
+      if (!hideReadReceipts && unreads.length > 0) {
+        setMessages(prev => prev.map(m => 
+          (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
+        ));
+        newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
       }
     }).catch(err => console.log(err));
 
@@ -107,7 +122,7 @@ export default function ChatScreen() {
       }
     });
 
-    // 2. 🔥 INSTANT LIVE MESSAGE (Bina atke scroll hoga) 🔥
+    // 🔥 SMART LIVE MESSAGE (Sound & Scroll fix) 🔥
     const handleReceiveMessage = (msg) => {
       if (msg.sender_id === receiverId || msg.receiver_id === receiverId) {
         setMessages(prev => {
@@ -119,14 +134,30 @@ export default function ChatScreen() {
           newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
         }
         
-        setTimeout(() => {
-          endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 50); 
+        if (msg.sender_id === receiverId) {
+          // Play Custom Tone smoothly
+          if (!isMutedRef.current) {
+            try {
+              const toneId = localStorage.getItem(`cv_sound_${receiverId}`) || localStorage.getItem('chatverse_default_tone') || 'ringtone1';
+              const audio = new Audio(`/sounds/${toneId}.mp3`);
+              audio.volume = 0.5;
+              audio.play();
+            } catch (e) {}
+          }
+          
+          // Smart Auto Scroll
+          if (isScrolledUpRef.current) {
+            setNewMsgBadge(true);
+          } else {
+            setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+          }
+        } else {
+          setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        }
       }
     };
     newSocket.on('receive_message', handleReceiveMessage);
 
-    // 3. SAMNE WALE NE PADH LIYA -> INSTANT BLUE TICKS
     newSocket.on('messages_read_bulk', ({ readerId }) => {
       if (readerId === receiverId) {
         setMessages(prev => prev.map(msg => 
@@ -164,8 +195,8 @@ export default function ChatScreen() {
       localStorage.setItem(`cv_theme_${receiverId}`, themeId);
     });
 
-    // 4. CLEANUP FUNCTION (Memory leak rokne ke liye)
     return () => {
+      isMounted = false; 
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       newSocket.off('companion_status_result');
       newSocket.off('user_online');
@@ -178,7 +209,7 @@ export default function ChatScreen() {
       newSocket.off('theme_updated');
       newSocket.disconnect();
     };
-  }, [receiverId, currentUser.unique_id, hideReadReceipts, isMuted]);
+  }, [receiverId, currentUser.unique_id, hideReadReceipts]);
     
   const formatTime = (dateString) => {
     if (!dateString) return 'Now';
@@ -210,15 +241,12 @@ export default function ChatScreen() {
 
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // FIX 2: Scroll Event Thrashing Fix (Butter Smooth Scrolling)
-  // Ye state ko har micro-second update hone se rokega aur 60 FPS maintain karega.
   const handleScroll = useCallback((e) => {
     const { scrollTop, clientHeight, scrollHeight } = e.target;
     const isUp = scrollHeight - scrollTop - clientHeight > 100;
     
     isScrolledUpRef.current = isUp;
     
-    // Sirf tabhi update karo jab status sach me change hua ho
     setShowScrollButton(prev => {
       if (prev !== isUp) return isUp;
       return prev;
@@ -227,7 +255,7 @@ export default function ChatScreen() {
     if (!isUp && newMsgBadge) {
       setNewMsgBadge(false);
     }
-  }, [newMsgBadge]); // <-- useCallback dependencies
+  }, [newMsgBadge]); 
   
   const scrollToBottom = () => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -245,13 +273,14 @@ export default function ChatScreen() {
           bubble.classList.remove('ring-4', 'ring-indigo-300', 'dark:ring-indigo-500', 'scale-[1.02]');
         }, 1200);
       }
+    } else {
+      alert("This message is too old to jump to.");
     }
   };
 
   const handleTyping = useCallback((e) => {
     setMessage(e.target.value);
     
-    // Auto-Resize Textarea without lagging the keyboard
     const target = e.target;
     window.requestAnimationFrame(() => {
       target.style.height = 'auto';
@@ -276,8 +305,11 @@ export default function ChatScreen() {
     setMessage('');
     setShowEmojiPicker(false);
 
-    const textarea = document.getElementById('chat-input');
-    if (textarea) textarea.style.height = 'auto';
+    // FIX: Instant height reset without glitch
+    window.requestAnimationFrame(() => {
+      const textarea = document.getElementById('chat-input');
+      if (textarea) textarea.style.height = 'auto';
+    });
     
     const replyIdToSend = replyingTo ? replyingTo.id : null;
     setReplyingTo(null);
@@ -300,7 +332,7 @@ export default function ChatScreen() {
   const handlePointerDown = (e, msg) => {
     if (msg.is_deleted_for_everyone) return;
     longPressTriggered.current = false;
-    swipeStartRef.current = { x: e.clientX, y: e.clientY };
+    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
     setSwipingId(msg.id);
     setSwipeOffset(0);
 
@@ -316,6 +348,8 @@ export default function ChatScreen() {
 
   const handlePointerMove = (e, msg) => {
     if (swipingId !== msg.id || selectedMessages.length > 0) return;
+    if (e.pointerId !== swipeStartRef.current.pointerId) return; 
+    
     const deltaX = e.clientX - swipeStartRef.current.x;
     const deltaY = Math.abs(e.clientY - swipeStartRef.current.y);
 
@@ -396,14 +430,17 @@ export default function ChatScreen() {
   };
 
   const handleDeleteForMe = async (messageId) => {
-    const previousMessages = [...messages]; 
+    const messageToRestore = messages.find(m => m.id === messageId);
     setMessages((prev) => prev.filter(msg => msg.id !== messageId));
     setSelectedMessages([]);
+    
     try {
       await api.delete(`/messages/forme/${messageId}`);
     } catch (err) {
       console.error("Delete failed, reverting UI");
-      setMessages(previousMessages);
+      if (messageToRestore) {
+        setMessages((prev) => [...prev, messageToRestore].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+      }
       alert("Failed to delete message. Please try again.");
     }
   };
@@ -456,13 +493,6 @@ export default function ChatScreen() {
   const visibleMessages = useMemo(() => {
     return messages.filter(m => !m.is_deleted_for_me);
   }, [messages]);
-  const firstUnreadIndex = useMemo(() => {
-    return visibleMessages.findIndex(m => m.sender_id === receiverId && m.status !== 'read');
-  }, [visibleMessages, receiverId]);
-
-  const unreadCount = useMemo(() => {
-    return visibleMessages.filter(m => m.sender_id === receiverId && m.status !== 'read').length;
-  }, [visibleMessages, receiverId]);
 
   const renderedEmojis = useMemo(() => {
     return chatEmojis.map((e, index) => (
@@ -474,7 +504,196 @@ export default function ChatScreen() {
         {e}
       </button>
     ));
-  }, []); // Emojis ek baar load honge aur hamesha instant chalenge
+  }, []); 
+
+  // FIX: Typing lag dur karne ke liye saare messages map ko memoize kar diya
+  const renderedMessagesList = useMemo(() => {
+    return messages.map((msg, index) => {
+
+      const isMe = msg.sender_id === currentUser.unique_id;
+      const hasReaction = !!msg.reaction;
+      const isSelected = selectedMessages.some(m => m.id === msg.id);
+      
+      const msgDate = new Date(msg.created_at || Date.now());
+      const prevMsgDate = index > 0 ? new Date(messages[index - 1].created_at || Date.now()) : null;
+      const showDateSeparator = !prevMsgDate || msgDate.toDateString() !== prevMsgDate.toDateString();
+
+      const isPrevSameSender = !showDateSeparator && index > 0 && messages[index - 1].sender_id === msg.sender_id;
+      const isNextSameSender = index < messages.length - 1 && messages[index + 1].sender_id === msg.sender_id && new Date(messages[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
+
+      let radiusClasses = 'rounded-2xl';
+      if (isMe) {
+        if (isPrevSameSender && isNextSameSender) radiusClasses = 'rounded-2xl rounded-tr-[4px] rounded-br-[4px]';
+        else if (isPrevSameSender) radiusClasses = 'rounded-2xl rounded-tr-[4px]';
+        else if (isNextSameSender) radiusClasses = 'rounded-2xl rounded-br-[4px]';
+        else radiusClasses = 'rounded-2xl rounded-tr-[4px]';
+      } else {
+        if (isPrevSameSender && isNextSameSender) radiusClasses = 'rounded-2xl rounded-tl-[4px] rounded-bl-[4px]';
+        else if (isPrevSameSender) radiusClasses = 'rounded-2xl rounded-tl-[4px]';
+        else if (isNextSameSender) radiusClasses = 'rounded-2xl rounded-bl-[4px]';
+        else radiusClasses = 'rounded-2xl rounded-tl-[4px]';
+      }
+
+      const marginClass = hasReaction ? 'mb-[24px]' : (isNextSameSender ? 'mb-[2px]' : 'mb-[12px]');
+
+      return (
+        <div key={msg.id || index} id={`msg-${msg.id}`} className={`w-full flex flex-col ${activeReactId === msg.id ? 'relative z-40' : 'relative z-0'}`}>
+          
+          {showDateSeparator && (
+             <div className="w-full flex justify-center my-4 relative z-0">
+                <span className="bg-gray-200/60 dark:bg-gray-800/60 backdrop-blur-sm text-gray-500 dark:text-gray-400 text-[11.5px] font-bold px-3.5 py-1 rounded-full shadow-sm z-10">
+                  {msgDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
+             </div>
+          )}
+
+          {msg.id === initialUnread.firstId && initialUnread.count > 0 && (
+            <div className="w-full flex justify-center my-4 relative z-0">
+              <div className="bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700 text-chatverse dark:text-indigo-400 text-[11px] font-black px-4 py-1.5 rounded-full z-10">
+                {initialUnread.count} UNREAD MESSAGE{initialUnread.count > 1 ? 'S' : ''}
+              </div>
+              <div className="absolute top-1/2 left-0 w-full h-[1px] bg-gray-300 dark:bg-gray-700/50 z-0"></div>
+            </div>
+          )}
+
+          <div className={`flex w-full ${marginClass} group ${isMe ? 'justify-end' : 'justify-start'}`}>
+            
+            {isMe && !msg.is_deleted_for_everyone && (
+              <div className={`flex items-center gap-1 px-2 transition-opacity self-center ${swipingId === msg.id ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
+                <button onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setActiveReactId(activeReactId === msg.id ? null : msg.id); 
+                    setShowMenu(false); 
+                    setShowEmojiPicker(false);
+                  }} 
+                  className="p-1.5 text-gray-500 hover:text-chatverse bg-white/50 dark:bg-black/20 rounded-full backdrop-blur-sm"
+                >
+                  <Smile className="w-[18px] h-[18px]"/>
+                </button>
+              </div>
+            )}
+
+            <div className="relative max-w-[80%] flex flex-col">
+              
+              {swipingId === msg.id && (
+                <div id={`reply-icon-${msg.id}`} className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
+                     style={{ left: '-6px', opacity: 0, transform: 'scale(0)' }}>
+                  <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
+                </div>
+              )}
+
+              <div id={`swipe-wrap-${msg.id}`} className="relative flex flex-col z-20"
+                   style={{ transform: 'translate3d(0px, 0, 0)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
+                
+                <div 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+                    if (selectedMessages.length > 0) toggleSelection(msg); 
+                  }}
+                  onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture?.(e.pointerId); handlePointerDown(e, msg); }}
+                  onPointerMove={(e) => { e.stopPropagation(); handlePointerMove(e, msg); }}
+                  onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(e, msg); }}
+                  onPointerCancel={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
+                  className={`message-bubble relative px-3 pt-2 pb-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
+                    isSelected ? `bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 ${radiusClasses}` :
+                    msg.is_deleted_for_everyone ? `bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 ${radiusClasses}` 
+                    : isMe ? `bg-chatverse text-white ${radiusClasses}` 
+                    : `bg-white dark:bg-gray-800 border border-gray-100/50 dark:border-gray-700/50 text-gray-800 dark:text-gray-100 ${radiusClasses}`
+                  }`}
+                >
+                  
+                  {msg.reply_content && !msg.is_deleted_for_everyone && (
+                    <div 
+                      onClick={(e) => { e.stopPropagation(); scrollToMessage(msg.reply_to_id); }}
+                      className={`mb-1.5 px-3 py-2 rounded-lg text-[13px] border-l-[3px] cursor-pointer flex flex-col transition-all hover:opacity-80 active:opacity-60 ${isMe ? 'bg-black/10 border-white/70 text-indigo-50' : 'bg-gray-100 dark:bg-gray-700 border-chatverse text-gray-600 dark:text-gray-300'}`}
+                    >
+                      <span className="line-clamp-2 leading-relaxed font-medium">{msg.reply_content}</span>
+                    </div>
+                  )}
+                  
+                  <div className="relative text-[15.5px] leading-[1.4] break-words">
+                    <span>{msg.content}</span>
+                    {!msg.is_deleted_for_everyone && (
+                      <span className={`inline-block h-[14px] ${isMe ? 'w-[85px]' : 'w-[60px]'}`}></span>
+                    )}
+                  </div>
+
+                  {!msg.is_deleted_for_everyone && (
+                    <div className={`absolute bottom-1 right-2 flex items-center gap-[3px] text-[10px] font-medium select-none ${isMe ? 'text-indigo-100/90' : 'text-gray-400 dark:text-gray-500'}`}>
+                      {msg.is_starred && <Star className="w-[10px] h-[10px] fill-current mr-0.5" />}
+                      <span className="leading-none">{formatTime(msg.created_at)}</span>
+                      {isMe && (
+                        <span className="flex items-center ml-0.5">
+                          {msg.status === 'sending' && <Clock className="w-[10px] h-[10px]" />}
+                          
+                          {(chatTheme !== 'romantic' && chatTheme !== 'valentine') && (
+                            <>
+                              {msg.status === 'sent' && <Check className="w-[12px] h-[12px]" />}
+                              {msg.status === 'delivered' && <CheckCheck className="w-[14px] h-[14px] text-indigo-200" />}
+                              {msg.status === 'read' && <CheckCheck className="w-[14px] h-[14px] text-[#4ADE80]" />}
+                            </>
+                          )}
+
+                          {(chatTheme === 'romantic' || chatTheme === 'valentine') && (
+                            <>
+                              {msg.status === 'sent' && <Heart className="w-[11px] h-[11px] text-white/60 dark:text-gray-400" />}
+                              {msg.status === 'delivered' && <Heart className="w-[11px] h-[11px] text-white fill-white" />}
+                              {msg.status === 'read' && <Heart className="w-[12px] h-[12px] text-[#ff4b4b] fill-[#ff4b4b] drop-shadow-md animate-pulse" />}
+                            </>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {msg.reaction && !msg.is_deleted_for_everyone && (
+                  <div className={`absolute -bottom-[14px] ${isMe ? 'right-2' : 'left-2'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-30 select-none flex items-center justify-center`}>
+                    {msg.reaction}
+                  </div>
+                )}
+
+                {activeReactId === msg.id && (
+                  <div 
+                    onClick={(e) => e.stopPropagation()} 
+                    className={`absolute z-[60] ${index < 3 ? 'top-full mt-1' : 'bottom-full mb-1'} ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 shadow-[0_4px_15px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 px-3 py-2 flex flex-row items-center gap-3 rounded-full animate-slide-up whitespace-nowrap w-max`}
+                  >
+                    {reactionEmojis.map(emoji => (
+                      <button 
+                        key={emoji} 
+                        onClick={() => handleInlineReaction(msg.id, emoji)} 
+                        className={`text-[24px] leading-none hover:scale-125 transition-transform flex items-center justify-center ${msg.reaction === emoji ? 'scale-125 drop-shadow-md' : ''}`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              
+              </div>
+            </div>
+
+            {!isMe && !msg.is_deleted_for_everyone && (
+              <div className={`flex items-center gap-1 px-2 transition-opacity self-center ${swipingId === msg.id ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
+                <button onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setActiveReactId(activeReactId === msg.id ? null : msg.id); 
+                    setShowMenu(false); 
+                    setShowEmojiPicker(false);
+                  }} 
+                  className="p-1.5 text-gray-500 hover:text-chatverse bg-white/50 dark:bg-black/20 rounded-full backdrop-blur-sm"
+                >
+                  <Smile className="w-[18px] h-[18px]"/>
+                </button>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    });
+  }, [messages, activeReactId, swipingId, selectedMessages, chatTheme, currentUser.unique_id, receiverId, initialUnread]);
 
   return (
     <div 
@@ -558,13 +777,14 @@ export default function ChatScreen() {
             </button>
             {showMenu && (
               <div className="absolute right-0 top-12 w-48 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[100]">
-                <button onClick={() => { setShowMenu(false); setShowThemeModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
+                <button onClick={() => { setShowMenu(false); setShowSoundModal(false); setShowThemeModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
                   <Palette className="w-4 h-4 text-chatverse" /> Chat Theme
                 </button>
                 <button 
                   onClick={() => { 
                     setPreviewChatTone(localStorage.getItem(`cv_sound_${receiverId}`) || 'default');
                     setShowMenu(false); 
+                    setShowThemeModal(false);
                     setShowSoundModal(true); 
                   }} 
                   className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50"
@@ -583,193 +803,7 @@ export default function ChatScreen() {
         className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
       >
-        {/* FIX: useMemo se saare messages lock ho jayenge, type karne pe lag 0 ho jayega */}
-        {messages.map((msg, index) => {
-
-          const isMe = msg.sender_id === currentUser.unique_id;
-          const hasReaction = !!msg.reaction;
-          const isSelected = selectedMessages.some(m => m.id === msg.id);
-          
-          const msgDate = new Date(msg.created_at || Date.now());
-          const prevMsgDate = index > 0 ? new Date(messages[index - 1].created_at || Date.now()) : null;
-          const showDateSeparator = !prevMsgDate || msgDate.toDateString() !== prevMsgDate.toDateString();
-
-          const isPrevSameSender = !showDateSeparator && index > 0 && messages[index - 1].sender_id === msg.sender_id;
-          const isNextSameSender = index < messages.length - 1 && messages[index + 1].sender_id === msg.sender_id && new Date(messages[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
-
-          let radiusClasses = 'rounded-2xl';
-          if (isMe) {
-            if (isPrevSameSender && isNextSameSender) radiusClasses = 'rounded-2xl rounded-tr-[4px] rounded-br-[4px]';
-            else if (isPrevSameSender) radiusClasses = 'rounded-2xl rounded-tr-[4px]';
-            else if (isNextSameSender) radiusClasses = 'rounded-2xl rounded-br-[4px]';
-            else radiusClasses = 'rounded-2xl rounded-tr-[4px]';
-          } else {
-            if (isPrevSameSender && isNextSameSender) radiusClasses = 'rounded-2xl rounded-tl-[4px] rounded-bl-[4px]';
-            else if (isPrevSameSender) radiusClasses = 'rounded-2xl rounded-tl-[4px]';
-            else if (isNextSameSender) radiusClasses = 'rounded-2xl rounded-bl-[4px]';
-            else radiusClasses = 'rounded-2xl rounded-tl-[4px]';
-          }
-
-          const marginClass = hasReaction ? 'mb-[24px]' : (isNextSameSender ? 'mb-[2px]' : 'mb-[12px]');
-
-          return (
-            <div key={msg.id || index} id={`msg-${msg.id}`} className={`w-full flex flex-col ${activeReactId === msg.id ? 'relative z-40' : 'relative z-0'}`}>
-              
-              {showDateSeparator && (
-                 <div className="w-full flex justify-center my-4 relative z-0">
-                    <span className="bg-gray-200/60 dark:bg-gray-800/60 backdrop-blur-sm text-gray-500 dark:text-gray-400 text-[11.5px] font-bold px-3.5 py-1 rounded-full shadow-sm z-10">
-                      {msgDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </span>
-                 </div>
-              )}
-
-              {index === firstUnreadIndex && unreadCount > 0 && (
-                <div className="w-full flex justify-center my-4 relative z-0">
-                  <div className="bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700 text-chatverse dark:text-indigo-400 text-[11px] font-black px-4 py-1.5 rounded-full z-10">
-                    {unreadCount} UNREAD MESSAGE{unreadCount > 1 ? 'S' : ''}
-                  </div>
-                  <div className="absolute top-1/2 left-0 w-full h-[1px] bg-gray-300 dark:bg-gray-700/50 z-0"></div>
-                </div>
-              )}
-
-              <div className={`flex w-full ${marginClass} group ${isMe ? 'justify-end' : 'justify-start'}`}>
-                
-                {isMe && !msg.is_deleted_for_everyone && (
-                  <div className={`flex items-center gap-1 px-2 transition-opacity self-center ${swipingId === msg.id ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setActiveReactId(activeReactId === msg.id ? null : msg.id); 
-                        setShowMenu(false); 
-                        setShowEmojiPicker(false);
-                      }} 
-                      className="p-1.5 text-gray-500 hover:text-chatverse bg-white/50 dark:bg-black/20 rounded-full backdrop-blur-sm"
-                    >
-                      <Smile className="w-[18px] h-[18px]"/>
-                    </button>
-                  </div>
-                )}
-
-                <div className="relative max-w-[80%] flex flex-col">
-                  
-                  {swipingId === msg.id && (
-                    <div id={`reply-icon-${msg.id}`} className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
-                         style={{ left: '-6px', opacity: 0, transform: 'scale(0)' }}>
-                      <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
-                    </div>
-                  )}
-
-                  <div id={`swipe-wrap-${msg.id}`} className="relative flex flex-col z-20"
-                       style={{ transform: 'translate3d(0px, 0, 0)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
-                    
-                    <div 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        if (longPressTriggered.current) { longPressTriggered.current = false; return; }
-                        if (selectedMessages.length > 0) toggleSelection(msg); 
-                      }}
-                      onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture?.(e.pointerId); handlePointerDown(e, msg); }}
-                      onPointerMove={(e) => { e.stopPropagation(); handlePointerMove(e, msg); }}
-                      onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(e, msg); }}
-                      onPointerLeave={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
-                      onPointerCancel={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
-                      className={`message-bubble relative px-3 pt-2 pb-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
-                        isSelected ? `bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 ${radiusClasses}` :
-                        msg.is_deleted_for_everyone ? `bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 ${radiusClasses}` 
-                        : isMe ? `bg-chatverse text-white ${radiusClasses}` 
-                        : `bg-white dark:bg-gray-800 border border-gray-100/50 dark:border-gray-700/50 text-gray-800 dark:text-gray-100 ${radiusClasses}`
-                      }`}
-                    >
-                      
-                      {msg.reply_content && !msg.is_deleted_for_everyone && (
-                        <div 
-                          onClick={(e) => { e.stopPropagation(); scrollToMessage(msg.reply_to_id); }}
-                          className={`mb-1.5 px-3 py-2 rounded-lg text-[13px] border-l-[3px] cursor-pointer flex flex-col transition-all hover:opacity-80 active:opacity-60 ${isMe ? 'bg-black/10 border-white/70 text-indigo-50' : 'bg-gray-100 dark:bg-gray-700 border-chatverse text-gray-600 dark:text-gray-300'}`}
-                        >
-                          <span className="line-clamp-2 leading-relaxed font-medium">{msg.reply_content}</span>
-                        </div>
-                      )}
-                      
-                      <div className="relative text-[15.5px] leading-[1.4] break-words">
-                        <span>{msg.content}</span>
-                        {!msg.is_deleted_for_everyone && (
-                          <span className={`inline-block h-[14px] ${isMe ? 'w-[85px]' : 'w-[60px]'}`}></span>
-                        )}
-                      </div>
-
-                      {!msg.is_deleted_for_everyone && (
-                        <div className={`absolute bottom-1 right-2 flex items-center gap-[3px] text-[10px] font-medium select-none ${isMe ? 'text-indigo-100/90' : 'text-gray-400 dark:text-gray-500'}`}>
-                          {msg.is_starred && <Star className="w-[10px] h-[10px] fill-current mr-0.5" />}
-                          <span className="leading-none">{formatTime(msg.created_at)}</span>
-                          {isMe && (
-                            <span className="flex items-center ml-0.5">
-                              {msg.status === 'sending' && <Clock className="w-[10px] h-[10px]" />}
-                              
-                              {(chatTheme !== 'romantic' && chatTheme !== 'valentine') && (
-                                <>
-                                  {msg.status === 'sent' && <Check className="w-[12px] h-[12px]" />}
-                                  {msg.status === 'delivered' && <CheckCheck className="w-[14px] h-[14px] text-indigo-200" />}
-                                  {msg.status === 'read' && <CheckCheck className="w-[14px] h-[14px] text-[#4ADE80]" />}
-                                </>
-                              )}
-
-                              {(chatTheme === 'romantic' || chatTheme === 'valentine') && (
-                                <>
-                                  {msg.status === 'sent' && <Heart className="w-[11px] h-[11px] text-white/60 dark:text-gray-400" />}
-                                  {msg.status === 'delivered' && <Heart className="w-[11px] h-[11px] text-white fill-white" />}
-                                  {msg.status === 'read' && <Heart className="w-[12px] h-[12px] text-[#ff4b4b] fill-[#ff4b4b] drop-shadow-md animate-pulse" />}
-                                </>
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {msg.reaction && !msg.is_deleted_for_everyone && (
-                      <div className={`absolute -bottom-[14px] ${isMe ? 'right-2' : 'left-2'} bg-white dark:bg-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.15)] dark:border dark:border-gray-700 rounded-full px-[6px] py-[2px] text-[12px] z-30 select-none flex items-center justify-center`}>
-                        {msg.reaction}
-                      </div>
-                    )}
-
-                    {activeReactId === msg.id && (
-                      <div 
-                        onClick={(e) => e.stopPropagation()} 
-                        className={`absolute z-[60] bottom-full mb-1 ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 shadow-[0_4px_15px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 px-3 py-2 flex flex-row items-center gap-3 rounded-full animate-slide-up whitespace-nowrap w-max`}
-                      >
-                        {reactionEmojis.map(emoji => (
-                          <button 
-                            key={emoji} 
-                            onClick={() => handleInlineReaction(msg.id, emoji)} 
-                            className={`text-[24px] leading-none hover:scale-125 transition-transform flex items-center justify-center ${msg.reaction === emoji ? 'scale-125 drop-shadow-md' : ''}`}
-                          >
-                            {emoji}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  
-                  </div>
-                </div>
-
-                {!isMe && !msg.is_deleted_for_everyone && (
-                  <div className={`flex items-center gap-1 px-2 transition-opacity self-center ${swipingId === msg.id ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setActiveReactId(activeReactId === msg.id ? null : msg.id); 
-                        setShowMenu(false); 
-                        setShowEmojiPicker(false);
-                      }} 
-                      className="p-1.5 text-gray-500 hover:text-chatverse bg-white/50 dark:bg-black/20 rounded-full backdrop-blur-sm"
-                    >
-                      <Smile className="w-[18px] h-[18px]"/>
-                    </button>
-                  </div>
-                )}
-
-              </div>
-            </div>
-          );
-        })}
+        {renderedMessagesList}
 
         {isTyping && (
           <div className="self-start max-w-[75%] mt-2 mb-2">
@@ -807,7 +841,6 @@ export default function ChatScreen() {
           </div>
         )}
 
-        {/* NAYA EMOJI RENDER CODE */}
         {showEmojiPicker && (
           <div 
             onClick={(e) => e.stopPropagation()} 
