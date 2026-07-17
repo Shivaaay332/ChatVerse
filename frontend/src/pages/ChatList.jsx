@@ -41,10 +41,11 @@ export default function ChatList() {
   const [typingUsers, setTypingUsers] = useState({});
   const typingTimeouts = useRef({});
   
-  // 👇 FIX: API Spam aur Race conditions rokne ke liye naye Refs
+  // Naye Refs (Fixes ke liye)
   const fetchTimeoutRef = useRef(null);
   const deletedChatsRef = useRef(new Set());
   const swipeStartRef = useRef({ x: 0, y: 0, pointerId: null });
+  const isMountedRef = useRef(true);
 
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -54,27 +55,47 @@ export default function ChatList() {
   const longPressTriggered = useRef(false);
   const touchStartPos = useRef({ x: 0, y: 0 });
 
+  // Safe Mount Tracker
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   const fetchChatsAndFriends = async () => {
     try {
       const chatRes = await api.get('/chats/recent');
-      setRecentChats(chatRes.data);
-      localStorage.setItem('chatverse_cached_recentChats', JSON.stringify(chatRes.data)); 
+      if (isMountedRef.current) {
+        setRecentChats(chatRes.data);
+        localStorage.setItem('chatverse_cached_recentChats', JSON.stringify(chatRes.data)); 
+      }
       
       const friendRes = await api.get('/friends');
-      setFriendsList(friendRes.data);
-      localStorage.setItem('chatverse_cached_friendsList', JSON.stringify(friendRes.data)); 
-      
-      setLoading(false);
+      if (isMountedRef.current) {
+        setFriendsList(friendRes.data);
+        localStorage.setItem('chatverse_cached_friendsList', JSON.stringify(friendRes.data)); 
+        setLoading(false);
+      }
     } catch (err) {
       console.log("Failed to fetch data:", err);
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    let isMounted = true; // FIX: Memory leak roko
     fetchChatsAndFriends();
-    const newSocket = io(SOCKET_URL);
+
+    const syncOnFocusOrUpdate = () => {
+      if (isMountedRef.current) fetchChatsAndFriends();
+    };
+    window.addEventListener('focus', syncOnFocusOrUpdate);
+    window.addEventListener('chatverse_settings_updated', syncOnFocusOrUpdate);
+    window.addEventListener('chatverse_chat_read', syncOnFocusOrUpdate);
+
+    const newSocket = io(SOCKET_URL, {
+      transports: ['websocket'], 
+      reconnectionAttempts: 5
+    });
+    
     newSocket.emit('join', currentUser.unique_id);
 
     newSocket.on('connect', () => {
@@ -82,39 +103,81 @@ export default function ChatList() {
     });
 
     newSocket.on('sync_complete', (syncedChats) => {
-      if (!isMounted) return;
-      // FIX: Jo chat delete ho chuki hai, use wapas sync hone se roko
+      if (!isMountedRef.current) return;
       setRecentChats(syncedChats.filter(c => !deletedChatsRef.current.has(c.unique_id)));
     });
 
-    // FIX: Debounce logic to prevent API DDoS attack on server
-    const debouncedFetch = () => {
+    newSocket.on('receive_message', (message) => {
+      if (!isMountedRef.current) return;
+
+      const senderId = message?.sender_id;
+
+      if (senderId) {
+        setTypingUsers(prev => ({ ...prev, [senderId]: false }));
+        if (typingTimeouts.current[senderId]) {
+          clearTimeout(typingTimeouts.current[senderId]);
+        }
+      }
+
+      if (senderId || message?.receiver_id) {
+        setRecentChats(prevChats => {
+          const chatIndex = prevChats.findIndex(c => 
+            c.unique_id === senderId || c.unique_id === message.receiver_id
+          );
+
+          if (chatIndex > -1) {
+            const updatedChat = { 
+              ...prevChats[chatIndex], 
+              last_message: message.text || "📷 Attachment",
+              last_message_time: new Date().toISOString(),
+              unread_count: senderId !== currentUser.unique_id 
+                            ? Number(prevChats[chatIndex].unread_count || 0) + 1 
+                            : 0
+            };
+            const newChats = [...prevChats];
+            newChats.splice(chatIndex, 1);
+            newChats.unshift(updatedChat); 
+            return newChats;
+          }
+          return prevChats;
+        });
+      }
+
       if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
       fetchTimeoutRef.current = setTimeout(() => {
-        if (isMounted) fetchChatsAndFriends();
-      }, 1500); 
-    };
+        if (isMountedRef.current) fetchChatsAndFriends();
+      }, 1000); 
+    });
 
-    newSocket.on('receive_message', debouncedFetch);
-    newSocket.on('message_updated', debouncedFetch);
+    newSocket.on('message_updated', () => {
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+      fetchTimeoutRef.current = setTimeout(() => {
+        if (isMountedRef.current) fetchChatsAndFriends();
+      }, 500);
+    });
 
     newSocket.on('typing', (senderId) => {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       setTypingUsers(prev => ({ ...prev, [senderId]: true }));
       if (typingTimeouts.current[senderId]) clearTimeout(typingTimeouts.current[senderId]);
+      
       typingTimeouts.current[senderId] = setTimeout(() => {
-        if (isMounted) setTypingUsers(prev => ({ ...prev, [senderId]: false }));
-      }, 2000);
+        if (isMountedRef.current) setTypingUsers(prev => ({ ...prev, [senderId]: false }));
+      }, 2500);
     });
 
     return () => {
-      isMounted = false;
+      window.removeEventListener('focus', syncOnFocusOrUpdate);
+      window.removeEventListener('chatverse_settings_updated', syncOnFocusOrUpdate);
+      window.removeEventListener('chatverse_chat_read', syncOnFocusOrUpdate);
+
       if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
-      Object.values(typingTimeouts.current).forEach(clearTimeout); // Clear all typing timeouts
+      Object.values(typingTimeouts.current).forEach(clearTimeout); 
       newSocket.disconnect();
     };
   }, [currentUser.unique_id]);
 
+  // Yeh missing ho gaya tha! (Search logic)
   useEffect(() => {
     const delay = setTimeout(async () => {
       if (searchQuery.trim().length > 0) {
@@ -128,9 +191,9 @@ export default function ChatList() {
     return () => clearTimeout(delay);
   }, [searchQuery]);
 
+  // Yeh sab handlers missing ho gaye the!
   const handlePointerDown = (e, chat) => {
     longPressTriggered.current = false;
-    // FIX: Multi-touch conflicts rokne ke liye pointerId track kiya
     swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
     pressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
@@ -140,7 +203,6 @@ export default function ChatList() {
   };
 
   const handlePointerMove = (e) => {
-    // FIX: Sirf usi finger ko track karo jisne touch shuru kiya
     if (e.pointerId !== swipeStartRef.current.pointerId) return;
     const dx = Math.abs(e.clientX - swipeStartRef.current.x);
     const dy = Math.abs(e.clientY - swipeStartRef.current.y);
@@ -163,9 +225,8 @@ export default function ChatList() {
 
   const confirmDeleteChat = async () => {
     if (!longPressedChat) return;
-    
     const chatId = longPressedChat.unique_id;
-    deletedChatsRef.current.add(chatId); // FIX: Deleted chat ko record karo sync filter ke liye
+    deletedChatsRef.current.add(chatId); 
     
     setRecentChats(prev => prev.filter(chat => chat.unique_id !== chatId));
     setLongPressedChat(null);
@@ -173,15 +234,14 @@ export default function ChatList() {
     try {
       await api.delete(`/chats/${chatId}`);
     } catch (err) {
-      // Revert if API fails
       deletedChatsRef.current.delete(chatId); 
       fetchChatsAndFriends();
       alert("Failed to delete chat.");
     }
   };
 
+  // Error ki vajah yehi thi - ye function udd gaya tha!
   const processedChats = useMemo(() => {
-    // FIX: Render loop ke bahar sirf ek baar saare favorites padh lo
     const favSet = new Set();
     recentChats.forEach(chat => {
       if (localStorage.getItem(`cv_fav_${chat.unique_id}`) === 'true') favSet.add(chat.unique_id);
@@ -193,12 +253,13 @@ export default function ChatList() {
       if (isAFav && !isBFav) return -1;
       if (!isAFav && isBFav) return 1;
       
-      // FIX: Pinned chats ke baad, latest message time ke hisaab se sort karo (pehle ye missing tha)
       const timeA = new Date(a.last_message_time || 0).getTime();
       const timeB = new Date(b.last_message_time || 0).getTime();
       return timeB - timeA;
     });
   }, [recentChats]);
+
+  // Yahan se niche aapka return ( ...) statement start hoga
 
   return (
     <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
