@@ -8,27 +8,47 @@ export default function BlockedUsers() {
   const [blockedUsers, setBlockedUsers] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const [actionLoading, setActionLoading] = useState(null); // FIX 2: Action Spam rokne ke liye state
+  const isMountedRef = useRef(true); // FIX 5: Memory leak rokne ke liye Ref
+
   useEffect(() => {
+    isMountedRef.current = true;
+    
+    const fetchBlockedUsers = async () => {
+      try {
+        const res = await api.get('/users/blocked');
+        if (isMountedRef.current) setBlockedUsers(res.data);
+      } catch (error) {
+        console.error("Error fetching blocked users");
+      } finally {
+        if (isMountedRef.current) setLoading(false); // FIX 3: Safe loading false
+      }
+    };
+
     fetchBlockedUsers();
+
+    return () => { isMountedRef.current = false; };
   }, []);
 
-  const fetchBlockedUsers = async () => {
-    try {
-      const res = await api.get('/users/blocked');
-      setBlockedUsers(res.data);
-    } catch (error) {
-      console.error("Error fetching blocked users");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleUnblock = async (blockedId) => {
+    if (actionLoading) return; // FIX 2: API Spam prevention
+
+    setActionLoading(blockedId);
+    
+    // FIX 4: Optimistic rollback ki jagah actual network resolve hone ka wait karenge
     try {
       await api.delete(`/users/unblock/${blockedId}`);
-      setBlockedUsers(blockedUsers.filter(u => u.blocked_id !== blockedId));
+      if (isMountedRef.current) {
+        setBlockedUsers(prev => prev.filter(u => u.blocked_id !== blockedId));
+      }
+      
+      // FIX 1: The "Ghost Block" Desync - Ye event poori app (Home, Chats) me user ko unblock kar dega
+      window.dispatchEvent(new Event('chatverse_settings_updated'));
+      
     } catch (err) {
-      alert("Error unblocking user");
+      alert("Error unblocking user. Please try again.");
+    } finally {
+      if (isMountedRef.current) setActionLoading(null);
     }
   };
 
@@ -66,8 +86,12 @@ export default function BlockedUsers() {
                     <p className="text-sm text-gray-500 dark:text-gray-400">@{user.blocked_id}</p>
                   </div>
                 </div>
-                <button onClick={() => handleUnblock(user.blocked_id)} className="px-4 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-                  Unblock
+                <button 
+                  onClick={() => handleUnblock(user.blocked_id)} 
+                  disabled={actionLoading === user.blocked_id}
+                  className={`px-4 py-1.5 font-semibold rounded-lg transition-colors flex items-center justify-center min-w-[85px] ${actionLoading === user.blocked_id ? 'bg-gray-50 dark:bg-gray-800 text-gray-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                >
+                  {actionLoading === user.blocked_id ? <Loader className="w-4 h-4 animate-spin" /> : 'Unblock'}
                 </button>
               </div>
             ))}

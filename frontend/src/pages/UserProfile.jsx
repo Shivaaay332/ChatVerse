@@ -27,22 +27,23 @@ export default function UserProfile() {
   const [customPrivacy, setCustomPrivacy] = useState(localStorage.getItem(`cv_privacy_${user.unique_id}`) === 'true');
 
   useEffect(() => {
-    if (!user.unique_id) {
-      navigate('/chats');
-      return;
-    }
+    if (!user.unique_id) { navigate('/chats'); return; }
+    if (user.unique_id === currentUser.unique_id) { navigate('/profile', { replace: true }); return; }
 
-    if (user.unique_id === currentUser.unique_id) {
-      navigate('/profile', { replace: true });
-      return;
-    }
+    let isMounted = true; // FIX: Memory leak prevent karne ke liye flag
 
     const fetchProfileData = async () => {
       try {
-        const postsRes = await api.get(`/posts/user/${user.unique_id}`);
+        // FIX: Teeno APIs ko ek sath (Parallel) call kar rahe hain performance badhane ke liye
+        const [postsRes, statusRes, userRes] = await Promise.all([
+          api.get(`/posts/user/${user.unique_id}`),
+          api.get(`/friends/status/${user.unique_id}`),
+          api.get(`/users/search?query=${user.unique_id}`)
+        ]);
+
+        if (!isMounted) return; // Component band ho gaya toh state update mat karo
+
         setUserPosts(postsRes.data);
-        
-        const statusRes = await api.get(`/friends/status/${user.unique_id}`);
         
         if (statusRes.data.status === 'none') {
           setRequestStatus('none');
@@ -57,42 +58,52 @@ export default function UserProfile() {
           }
         }
 
-        const userRes = await api.get(`/users/search?query=${user.unique_id}`);
         const exactUser = userRes.data.find(u => u.unique_id === user.unique_id);
         if (exactUser && exactUser.bio) {
           setBioText(exactUser.bio);
         }
       } catch (error) {
         console.error("Failed to load user profile data", error);
-        setRequestStatus('none');
+        if (isMounted) setRequestStatus('none');
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
     
     fetchProfileData();
+    
+    return () => { isMounted = false; }; // Cleanup function for memory safety
   }, [user.unique_id, navigate, currentUser.unique_id]);
 
   const handleSendRequest = async () => {
+    const prevStatus = requestStatus; // State backup
     try {
       setRequestStatus('loading_action');
       await api.post('/friends/request', { receiver_id: user.unique_id });
       setRequestStatus('sent');
-    } catch (err) { alert("Error sending request."); }
+    } catch (err) { 
+      setRequestStatus(prevStatus); // FIX: Error aane par purani state wapas laao
+      alert("Error sending request."); 
+    }
   };
 
   const handleAcceptRequest = async () => {
+    const prevStatus = requestStatus;
     try {
       setRequestStatus('loading_action');
       await api.put(`/friends/accept/${requestId}`);
       setRequestStatus('friends');
       const postsRes = await api.get(`/posts/user/${user.unique_id}`);
       setUserPosts(postsRes.data);
-    } catch (err) { alert("Error accepting request."); }
+    } catch (err) { 
+      setRequestStatus(prevStatus); 
+      alert("Error accepting request."); 
+    }
   };
 
   const handleUnfriend = async () => {
     if (window.confirm(`Are you sure you want to unfriend ${user.username}?`)) {
+      const prevStatus = requestStatus;
       try {
         setRequestStatus('loading_action');
         if (requestId) await api.delete(`/friends/reject/${requestId}`);
@@ -103,7 +114,10 @@ export default function UserProfile() {
         setRequestStatus('none');
         setRequestId(null);
         setUserPosts([]); 
-      } catch (err) { alert("Error removing friend."); }
+      } catch (err) { 
+        setRequestStatus(prevStatus); 
+        alert("Error removing friend."); 
+      }
     }
   };
 
@@ -117,25 +131,42 @@ export default function UserProfile() {
     }
   };
 
-  const handleMessage = () => {
-    navigate(`/chat/${user.unique_id}`, { state: { name: user.username, id: user.unique_id } });
+  const handleMessage = async () => {
+    // FIX: Message bhejte time block list pehle check karo
+    try {
+      const blockedRes = await api.get('/users/blocked');
+      const isBlocked = blockedRes.data.some(u => u.blocked_id === user.unique_id);
+      if (isBlocked) {
+        alert("You cannot message a blocked user. Unblock them in settings first.");
+        return;
+      }
+      navigate(`/chat/${user.unique_id}`, { state: { name: user.username, id: user.unique_id } });
+    } catch(err) {
+      navigate(`/chat/${user.unique_id}`, { state: { name: user.username, id: user.unique_id } }); // Fallback
+    }
   };
 
   const toggleMute = () => {
-    setIsMuted(!isMuted);
-    localStorage.setItem(`cv_mute_${user.unique_id}`, !isMuted);
+    const newValue = !isMuted;
+    setIsMuted(newValue);
+    localStorage.setItem(`cv_mute_${user.unique_id}`, newValue);
+    window.dispatchEvent(new Event('chatverse_settings_updated')); // FIX: Global Event for ChatList
     setShowMenu(false);
   };
 
   const toggleFavorite = () => {
-    setIsFavorite(!isFavorite);
-    localStorage.setItem(`cv_fav_${user.unique_id}`, !isFavorite);
+    const newValue = !isFavorite;
+    setIsFavorite(newValue);
+    localStorage.setItem(`cv_fav_${user.unique_id}`, newValue);
+    window.dispatchEvent(new Event('chatverse_settings_updated')); // FIX: Global Event for ChatList
     setShowMenu(false);
   };
 
   const toggleCustomPrivacy = () => {
-    setCustomPrivacy(!customPrivacy);
-    localStorage.setItem(`cv_privacy_${user.unique_id}`, !customPrivacy);
+    const newValue = !customPrivacy;
+    setCustomPrivacy(newValue);
+    localStorage.setItem(`cv_privacy_${user.unique_id}`, newValue);
+    window.dispatchEvent(new Event('chatverse_settings_updated')); // FIX: Global Event
     setShowMenu(false);
   };
 

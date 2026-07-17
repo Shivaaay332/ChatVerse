@@ -1,11 +1,15 @@
-import { useState, useEffect } from 'react';
-import { ArrowLeft, Sun, Moon, Lock, EyeOff, LogOut, UserX, ChevronRight, Shield, Delete, X, AlertTriangle, CaseUpper, BadgeCheck, Check } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Sun, Moon, Lock, EyeOff, LogOut, UserX, ChevronRight, Shield, Delete, X, AlertTriangle, CaseUpper, BadgeCheck, Check, Loader } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
 
-const ToggleSwitch = ({ isOn, onToggle }) => (
-  <div onClick={onToggle} className={`w-[46px] h-[26px] flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${isOn ? 'bg-chatverse' : 'bg-gray-200 dark:bg-gray-600'}`}>
+// FIX: Added 'disabled' prop to prevent API Spam
+const ToggleSwitch = ({ isOn, onToggle, disabled }) => (
+  <div 
+    onClick={disabled ? null : onToggle} 
+    className={`w-[46px] h-[26px] flex items-center rounded-full p-1 transition-colors duration-300 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${isOn ? 'bg-chatverse' : 'bg-gray-200 dark:bg-gray-600'}`}
+  >
     <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform transition-transform duration-300 ${isOn ? 'translate-x-5' : 'translate-x-0'}`} />
   </div>
 );
@@ -13,6 +17,7 @@ const ToggleSwitch = ({ isOn, onToggle }) => (
 export default function Settings() {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || {};
+  const isMountedRef = useRef(true);
 
   const [darkMode, setDarkMode] = useState(localStorage.getItem('chatverse_darkmode') === 'true');
   const [appLock, setAppLock] = useState(localStorage.getItem('chatverse_applock') === 'true');
@@ -21,9 +26,12 @@ export default function Settings() {
   const [hideReadReceipts, setHideReadReceipts] = useState(localStorage.getItem('chatverse_hide_readreceipts') === 'true');
   const [fontSizeIndex, setFontSizeIndex] = useState(parseInt(localStorage.getItem('chatverse_fontsize') || '1'));
 
+  const [isUpdatingPrivacy, setIsUpdatingPrivacy] = useState(false);
+
   const [showToneModal, setShowToneModal] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(Notification.permission === 'granted');
-  const [previewTone, setPreviewTone] = useState(''); // NEW STATE FOR PREVIEW
+  const [previewTone, setPreviewTone] = useState('');
+  
   const [showPinModal, setShowPinModal] = useState(false);
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -35,12 +43,49 @@ export default function Settings() {
   const [deleteError, setDeleteError] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // FIX: Safe Initialization & OS Permission Sync
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // Check Actual Notification Permissions
+    if ('permissions' in navigator) {
+      navigator.permissions.query({ name: 'notifications' }).then((status) => {
+        if (isMountedRef.current) {
+          setPushEnabled(status.state === 'granted');
+          status.onchange = () => { if (isMountedRef.current) setPushEnabled(status.state === 'granted'); };
+        }
+      });
+    }
+
+    // Safely sync privacy settings from server to prevent desync
+    const fetchPrivacySettings = async () => {
+      try {
+        const res = await api.get('/users/me/privacy');
+        if (isMountedRef.current && res.data) {
+          setHideLastSeen(res.data.hide_last_seen);
+          setHideOnline(res.data.hide_online_status);
+          setHideReadReceipts(res.data.hide_read_receipts);
+          
+          localStorage.setItem('chatverse_hide_lastseen', res.data.hide_last_seen);
+          localStorage.setItem('chatverse_hide_online', res.data.hide_online_status);
+          localStorage.setItem('chatverse_hide_readreceipts', res.data.hide_read_receipts);
+        }
+      } catch (e) { /* Silently fail, fallback to localStorage */ }
+    };
+    
+    fetchPrivacySettings();
+
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   const handleDarkMode = () => {
     const newValue = !darkMode;
     setDarkMode(newValue);
     localStorage.setItem('chatverse_darkmode', newValue);
     if (newValue) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
+    // FIX: Global event to update UI uniformly
+    window.dispatchEvent(new Event('chatverse_theme_updated'));
   };
 
   const handleFontSizeChange = (e) => {
@@ -59,28 +104,62 @@ export default function Settings() {
     }
   };
 
+  // FIX: Action Lock (API Spam Prevention) & Optimistic Rollback
   const handleLastSeen = async () => {
+    if (isUpdatingPrivacy) return;
+    const previousValue = hideLastSeen;
     const newValue = !hideLastSeen;
+    
+    setIsUpdatingPrivacy(true);
     setHideLastSeen(newValue);
-    localStorage.setItem('chatverse_hide_lastseen', newValue);
+    
     try { 
       await api.put('/users/me/privacy', { hideLastSeen: newValue }); 
-    } catch(err) { console.error(err); }
+      localStorage.setItem('chatverse_hide_lastseen', newValue);
+    } catch(err) { 
+      if (isMountedRef.current) setHideLastSeen(previousValue); // Rollback on error
+      alert("Failed to update setting. Please try again.");
+    } finally {
+      if (isMountedRef.current) setIsUpdatingPrivacy(false);
+    }
   };
 
   const handleHideOnline = async () => {
+    if (isUpdatingPrivacy) return;
+    const previousValue = hideOnline;
     const newValue = !hideOnline;
+    
+    setIsUpdatingPrivacy(true);
     setHideOnline(newValue);
-    localStorage.setItem('chatverse_hide_online', newValue);
+    
     try { 
       await api.put('/users/me/privacy', { hideOnlineStatus: newValue }); 
-    } catch(err) { console.error(err); }
+      localStorage.setItem('chatverse_hide_online', newValue);
+    } catch(err) { 
+      if (isMountedRef.current) setHideOnline(previousValue); 
+      alert("Failed to update setting. Please try again.");
+    } finally {
+      if (isMountedRef.current) setIsUpdatingPrivacy(false);
+    }
   };
 
-  const handleReadReceipts = () => {
+  const handleReadReceipts = async () => {
+    if (isUpdatingPrivacy) return;
+    const previousValue = hideReadReceipts;
     const newValue = !hideReadReceipts;
+    
+    setIsUpdatingPrivacy(true);
     setHideReadReceipts(newValue);
-    localStorage.setItem('chatverse_hide_readreceipts', newValue);
+    
+    try { 
+      await api.put('/users/me/privacy', { hideReadReceipts: newValue }); 
+      localStorage.setItem('chatverse_hide_readreceipts', newValue);
+    } catch(err) { 
+      if (isMountedRef.current) setHideReadReceipts(previousValue); 
+      alert("Failed to update setting. Please try again.");
+    } finally {
+      if (isMountedRef.current) setIsUpdatingPrivacy(false);
+    }
   };
 
   const handleGetVerified = async () => {
@@ -94,10 +173,12 @@ export default function Settings() {
     } catch (err) { alert("Failed to get verified. Please try again."); }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await api.post('/notifications/unsubscribe').catch(() => {}); } catch(e) {}
+    window.dispatchEvent(new Event('chatverse_logout_trigger'));
     localStorage.clear();
     document.documentElement.style.fontSize = '16px'; 
-    navigate('/');
+    window.location.href = '/'; // Hard reload to kill all active websockets
   };
 
   const handleKeyPress = (num) => {
@@ -109,16 +190,18 @@ export default function Settings() {
   useEffect(() => {
     if (pin.length === 4) {
       if (step === 1) {
-        setTimeout(() => { setConfirmPin(pin); setPin(''); setStep(2); }, 300);
+        setTimeout(() => { if(isMountedRef.current) { setConfirmPin(pin); setPin(''); setStep(2); }}, 300);
       } else if (step === 2) {
         if (pin === confirmPin) {
           localStorage.setItem('chatverse_pin', pin);
           localStorage.setItem('chatverse_applock', 'true');
           setAppLock(true);
-          setTimeout(() => setShowPinModal(false), 300);
+          // FIX: Lock Bypass Vulnerability - Instantly enforce app lock globally
+          window.dispatchEvent(new Event('chatverse_applock_triggered'));
+          setTimeout(() => { if(isMountedRef.current) setShowPinModal(false); }, 300);
         } else {
           setPinError(true);
-          setTimeout(() => setPin(''), 500);
+          setTimeout(() => { if(isMountedRef.current) setPin(''); }, 500);
         }
       }
     }
@@ -128,13 +211,26 @@ export default function Settings() {
     if (!deletePassword) { setDeleteError('Password is required'); return; }
     setIsDeleting(true); setDeleteError('');
     try {
+      // FIX: The "Ghost Push" Deletion Flaw - Complete cleanup of background workers
+      await api.post('/notifications/unsubscribe').catch(() => {});
+      
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (let reg of regs) { await reg.unregister(); }
+      }
+
       await api.delete('/users/me', { data: { password: deletePassword } });
+      
+      window.dispatchEvent(new Event('chatverse_logout_trigger'));
       localStorage.clear();
       document.documentElement.style.fontSize = '16px';
-      navigate('/');
+      
+      window.location.href = '/'; // Hard reset
     } catch (err) {
-      setDeleteError(err.response?.data?.error || 'Failed to delete account');
-      setIsDeleting(false);
+      if (isMountedRef.current) {
+        setDeleteError(err.response?.data?.error || 'Failed to delete account');
+        setIsDeleting(false);
+      }
     }
   };
 
@@ -230,7 +326,7 @@ export default function Settings() {
               </div>
               <span className="font-bold text-gray-900 dark:text-white text-[15px]">Hide Last Seen</span>
             </div>
-            <ToggleSwitch isOn={hideLastSeen} onToggle={handleLastSeen} />
+            <ToggleSwitch isOn={hideLastSeen} onToggle={handleLastSeen} disabled={isUpdatingPrivacy} />
           </div>
 
           <div className="flex items-center justify-between py-2 mb-3">
@@ -243,7 +339,7 @@ export default function Settings() {
                 <span className="text-[12px] text-gray-500">Hide live status from others</span>
               </div>
             </div>
-            <ToggleSwitch isOn={hideOnline} onToggle={handleHideOnline} />
+            <ToggleSwitch isOn={hideOnline} onToggle={handleHideOnline} disabled={isUpdatingPrivacy} />
           </div>
 
           <div className="flex items-center justify-between py-2 mb-3">
@@ -253,7 +349,7 @@ export default function Settings() {
               </div>
               <span className="font-bold text-gray-900 dark:text-white text-[15px]">Hide Read Receipts</span>
             </div>
-            <ToggleSwitch isOn={hideReadReceipts} onToggle={handleReadReceipts} />
+            <ToggleSwitch isOn={hideReadReceipts} onToggle={handleReadReceipts} disabled={isUpdatingPrivacy} />
           </div>
 
           <div onClick={() => navigate('/blocked')} className="flex items-center justify-between py-2 cursor-pointer group">
@@ -372,13 +468,11 @@ export default function Settings() {
         </div>
       )}
 
-      {/* WHATSAPP STYLE DEFAULT TONE MODAL */}
       {showToneModal && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowToneModal(false)}>
           <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-[24px] p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4">Set Default Tone</h3>
             
-            {/* Scrollable List for 8 Tones */}
             <div className="flex flex-col gap-2 max-h-[50vh] overflow-y-auto no-scrollbar pb-2 px-1">
               {[1, 2, 3, 4, 5, 6, 7, 8].map(num => {
                 const toneId = `ringtone${num}`;
@@ -392,8 +486,6 @@ export default function Settings() {
                     className={`flex items-center justify-between p-3.5 rounded-2xl transition-all ${previewTone === toneId ? 'bg-indigo-50 border border-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                   >
                     <span className="font-bold text-[14.5px] text-gray-800 dark:text-gray-100">Tone {num}</span>
-                    
-                    {/* WhatsApp Style Radio Circle */}
                     <div className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center transition-colors ${previewTone === toneId ? 'border-chatverse' : 'border-gray-300 dark:border-gray-500'}`}>
                       {previewTone === toneId && <div className="w-[10px] h-[10px] bg-chatverse rounded-full" />}
                     </div>
@@ -402,12 +494,13 @@ export default function Settings() {
               })}
             </div>
 
-            {/* Save & Cancel Buttons */}
             <div className="flex gap-3 mt-4">
               <button onClick={() => setShowToneModal(false)} className="flex-1 bg-gray-100 dark:bg-gray-700 font-bold py-3.5 rounded-xl text-gray-800 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Cancel</button>
               <button 
                 onClick={() => {
                   localStorage.setItem('chatverse_default_tone', previewTone); 
+                  // FIX: Broadcast Tone change to other components globally
+                  window.dispatchEvent(new Event('chatverse_settings_updated'));
                   setShowToneModal(false);
                 }} 
                 className="flex-1 bg-chatverse text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
@@ -449,7 +542,7 @@ export default function Settings() {
                 disabled={isDeleting || !deletePassword}
                 className="w-full bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-colors flex items-center justify-center"
               >
-                {isDeleting ? 'Deleting...' : 'Permanently Delete'}
+                {isDeleting ? <Loader className="w-5 h-5 animate-spin" /> : 'Permanently Delete'}
               </button>
               <button 
                 onClick={() => setShowDeleteModal(false)}

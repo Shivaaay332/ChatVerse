@@ -31,23 +31,36 @@ export default function Notifications() {
   const longPressTriggered = useRef(false);
   const touchStartPos = useRef({ x: 0, y: 0 });
 
+  const isMountedRef = useRef(true);
+
   useEffect(() => {
-    fetchNotifications();
-    markAsRead();
+    isMountedRef.current = true;
+    
+    const initNotifications = async () => {
+      try {
+        const res = await api.get('/notifications');
+        if (!isMountedRef.current) return;
+        
+        setNotifications(res.data);
+        setLoading(false);
+
+        // FIX: Sirf tabhi mark-read API call karo agar actually me koi unread notification ho
+        const hasUnread = res.data.some(n => !n.is_read);
+        if (hasUnread) {
+          await api.put('/notifications/read');
+          // FIX: Global event dispatch taaki BottomNav ka Red Dot instantly gayab ho jaye (No Phantom Dots)
+          window.dispatchEvent(new Event('chatverse_notifications_read'));
+        }
+      } catch (error) { 
+        console.error("Error fetching alerts"); 
+        if (isMountedRef.current) setLoading(false);
+      }
+    };
+
+    initNotifications();
+
+    return () => { isMountedRef.current = false; };
   }, []);
-
-  const fetchNotifications = async () => {
-    try {
-      const res = await api.get('/notifications');
-      setNotifications(res.data);
-    } catch (error) { console.error("Error fetching alerts"); } 
-    finally { setLoading(false); }
-  };
-
-  const markAsRead = async () => {
-    try { await api.put('/notifications/read'); } 
-    catch (e) { /* ignore silently */ }
-  };
 
   // --- Long Press Handlers ---
   const toggleSelection = (id) => {
@@ -85,25 +98,57 @@ export default function Notifications() {
     } catch (error) { alert("Error deleting notifications"); }
   };
 
+  // FIX: Action Loading State to prevent spam
+  const [actionLoading, setActionLoading] = useState(null);
+
   // --- Friend Request Actions ---
   const handleAcceptRequest = async (id, e) => {
     if(e) e.stopPropagation(); 
+    if (actionLoading) return;
+    
+    setActionLoading(id);
     try {
       await api.put(`/friends/accept/${id}`);
-      setNotifications(prev => prev.filter(n => !(n.type === 'friend_request' && n.ref_id === id)));
-    } catch (error) { alert("Error accepting request"); }
+      if (isMountedRef.current) {
+        setNotifications(prev => prev.filter(n => !(n.type === 'friend_request' && n.ref_id === id)));
+      }
+    } catch (error) { 
+      alert("Error accepting request"); 
+    } finally {
+      if (isMountedRef.current) setActionLoading(null);
+    }
   };
 
   const handleRejectRequest = async (id, e) => {
     if(e) e.stopPropagation();
+    if (actionLoading) return;
+
+    setActionLoading(id);
     try {
       await api.delete(`/friends/reject/${id}`);
-      setNotifications(prev => prev.filter(n => !(n.type === 'friend_request' && n.ref_id === id)));
-    } catch (error) { alert("Error deleting request"); }
+      if (isMountedRef.current) {
+        setNotifications(prev => prev.filter(n => !(n.type === 'friend_request' && n.ref_id === id)));
+      }
+    } catch (error) { 
+      alert("Error rejecting request"); 
+    } finally {
+      if (isMountedRef.current) setActionLoading(null);
+    }
   };
 
-  const handleNotificationClick = (notif) => {
-    navigate(`/user/${notif.unique_id}`, { state: { user: { unique_id: notif.unique_id, username: notif.username } } });
+  const handleNotificationClick = async (notif) => {
+    // FIX: Secure Navigation - Pehle block status verify karo
+    try {
+      const blockedRes = await api.get('/users/blocked');
+      const isBlocked = blockedRes.data.some(u => u.blocked_id === notif.unique_id);
+      if (isBlocked) {
+        alert("You cannot view or interact with a blocked user.");
+        return;
+      }
+      navigate(`/user/${notif.unique_id}`, { state: { user: { unique_id: notif.unique_id, username: notif.username } } });
+    } catch (err) {
+      navigate(`/user/${notif.unique_id}`, { state: { user: { unique_id: notif.unique_id, username: notif.username } } });
+    }
   };
 
   const renderIcon = (type) => {
@@ -183,10 +228,11 @@ export default function Notifications() {
               return (
                 <div 
                   key={index} 
-                  onPointerDown={(e) => handlePointerDown(e, notif)}
+                  // FIX: Pointer Events multi-touch capture
+                  onPointerDown={(e) => { e.currentTarget.setPointerCapture?.(e.pointerId); handlePointerDown(e, notif); }}
                   onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUpOrLeave}
-                  onPointerLeave={handlePointerUpOrLeave}
+                  onPointerUp={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(); }}
+                  onPointerCancel={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(); }}
                   onClick={() => {
                     if (longPressTriggered.current) { longPressTriggered.current = false; return; }
                     if (selectedNotifs.length > 0 && notif.type !== 'friend_request') { toggleSelection(notif.notif_id); return; }
@@ -230,13 +276,21 @@ export default function Notifications() {
                   </div>
 
                   {notif.type === 'friend_request' && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button onClick={(e) => handleAcceptRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-chatverse text-white rounded-full flex items-center justify-center hover:bg-indigo-700 hover:scale-105 transition-all shadow-md">
-                        <Check className="w-5 h-5" />
-                      </button>
-                      <button onClick={(e) => handleRejectRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-500 transition-colors">
-                        <X className="w-5 h-5" />
-                      </button>
+                    <div className="flex items-center gap-2 shrink-0 h-[38px]">
+                      {actionLoading === notif.ref_id ? (
+                        <div className="w-[84px] flex items-center justify-center">
+                          <Loader className="w-6 h-6 text-chatverse animate-spin" />
+                        </div>
+                      ) : (
+                        <>
+                          <button onClick={(e) => handleAcceptRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-chatverse text-white rounded-full flex items-center justify-center hover:bg-indigo-700 hover:scale-105 transition-all shadow-md">
+                            <Check className="w-5 h-5" />
+                          </button>
+                          <button onClick={(e) => handleRejectRequest(notif.ref_id, e)} className="w-[38px] h-[38px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-500 transition-colors">
+                            <X className="w-5 h-5" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                   

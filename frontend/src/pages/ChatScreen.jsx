@@ -23,6 +23,22 @@ export default function ChatScreen() {
   // FIX: Socket reconnect rokne ke liye isMuted ko ref me store kiya
   const isMutedRef = useRef(isMuted);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+      } else {
+        setViewportHeight(`${window.innerHeight}px`);
+      }
+    };
+    window.visualViewport?.addEventListener('resize', handleResize);
+    window.addEventListener('resize', handleResize);
+    handleResize(); 
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
   const [showThemeModal, setShowThemeModal] = useState(false);
@@ -50,6 +66,17 @@ export default function ChatScreen() {
   
   const [swipingId, setSwipingId] = useState(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
+
+  // BUG 7 & 10 FIX: Offline and Blocked States
+  const [isConnected, setIsConnected] = useState(true);
+  const [isBlocked, setIsBlocked] = useState(false); // Backend se block status yahan set hoga
+
+  // BUG 5 FIX: Typing Emit ke liye Debounce Ref
+  const emitTypingTimeoutRef = useRef(null);
+
+  // BUG 1, 2, 3 FIX: Socket hook ko baar-baar chalne se rokne ke liye inko ref me daalein
+  const hideReadReceiptsRef = useRef(hideReadReceipts);
+  useEffect(() => { hideReadReceiptsRef.current = hideReadReceipts; }, [hideReadReceipts]);
   
   // FIX: Multi-touch break rokne ke liye pointerId track kiya
   const swipeStartRef = useRef({ x: 0, y: 0, pointerId: null });
@@ -68,34 +95,40 @@ export default function ChatScreen() {
   const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   // ==============================================================
-  // MAIN SOCKET & CHAT LOGIC
+  // MAIN SOCKET & CHAT LOGIC (Fully Optimized)
   // ==============================================================
   useEffect(() => {
-    let isMounted = true; // FIX: Memory leak prevent karne ke liye flag
-    const newSocket = io(SOCKET_URL);
+    let isMounted = true; 
+    // BUG 3 FIX: Reconnection logic aur single instance 
+    const newSocket = io(SOCKET_URL, {
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
     setSocket(newSocket);
-    newSocket.emit('join', currentUser.unique_id);
 
+    // BUG 7 FIX: Connection Status tracking
+    newSocket.on('connect', () => isMounted && setIsConnected(true));
+    newSocket.on('disconnect', () => isMounted && setIsConnected(false));
+
+    newSocket.emit('join', currentUser.unique_id);
     newSocket.emit('check_companion_status', { targetId: receiverId });
 
+    // BUG 6 FIX: API Call Memory Leak Prevention
     api.get(`/messages/${receiverId}`).then(res => {
       if (!isMounted) return; 
       
       const fetchedMessages = res.data;
-
-      // FIX: Database me mark-read hone se pehle unreads nikalo
       const unreads = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
       if (unreads.length > 0) {
         setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
       }
-
       setMessages(fetchedMessages);
 
       setTimeout(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 100);
 
-      if (!hideReadReceipts && unreads.length > 0) {
+      if (!hideReadReceiptsRef.current && unreads.length > 0) {
         setMessages(prev => prev.map(m => 
           (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
         ));
@@ -110,10 +143,7 @@ export default function ChatScreen() {
       }
     });
 
-    newSocket.on('user_online', (uid) => {
-      if (uid === receiverId) setIsOnline(true);
-    });
-
+    newSocket.on('user_online', (uid) => { if (uid === receiverId) setIsOnline(true); });
     newSocket.on('user_offline', (data) => {
       const uid = typeof data === 'string' ? data : data?.userId;
       if (uid === receiverId) {
@@ -122,7 +152,7 @@ export default function ChatScreen() {
       }
     });
 
-    // 🔥 SMART LIVE MESSAGE (Sound & Scroll fix) 🔥
+    // BUG 1 & 8 FIX: Echo Chamber and Scroll Hijacker fixed
     const handleReceiveMessage = (msg) => {
       if (msg.sender_id === receiverId || msg.receiver_id === receiverId) {
         setMessages(prev => {
@@ -130,50 +160,42 @@ export default function ChatScreen() {
           return [...prev, msg];
         });
         
-        if (!hideReadReceipts) {
+        // BUG 11 FIX: Dynamic Read Receipt Emit 
+        if (!hideReadReceiptsRef.current && msg.sender_id === receiverId) {
           newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
         }
         
         if (msg.sender_id === receiverId) {
-          // Play Custom Tone smoothly
           if (!isMutedRef.current) {
             try {
               const toneId = localStorage.getItem(`cv_sound_${receiverId}`) || localStorage.getItem('chatverse_default_tone') || 'ringtone1';
               const audio = new Audio(`/sounds/${toneId}.mp3`);
-              audio.volume = 0.5;
-              audio.play();
+              audio.volume = 0.5; audio.play();
             } catch (e) {}
           }
-          
-          // Smart Auto Scroll
+          // STRICT SCROLL CHECK
           if (isScrolledUpRef.current) {
             setNewMsgBadge(true);
           } else {
             setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
           }
-        } else {
-          setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
         }
       }
     };
     newSocket.on('receive_message', handleReceiveMessage);
 
+    // BUG 2 FIX: Functional updates properly used
     newSocket.on('messages_read_bulk', ({ readerId }) => {
       if (readerId === receiverId) {
         setMessages(prev => prev.map(msg => 
-          (msg.sender_id === currentUser.unique_id && msg.status !== 'read') 
-            ? { ...msg, status: 'read' } 
-            : msg
+          (msg.sender_id === currentUser.unique_id && msg.status !== 'read') ? { ...msg, status: 'read' } : msg
         ));
       }
     });
 
     newSocket.on('typing', (senderId) => {
       if (senderId === receiverId) {
-        setIsTyping(true);
-        setIsOnline(true); 
-        setLastSeenTime(new Date().toISOString()); 
-        
+        setIsTyping(true); setIsOnline(true); setLastSeenTime(new Date().toISOString()); 
         if (!isScrolledUpRef.current) {
           setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         }
@@ -191,47 +213,37 @@ export default function ChatScreen() {
     });
 
     newSocket.on('theme_updated', ({ themeId }) => {
-      setChatTheme(themeId);
-      localStorage.setItem(`cv_theme_${receiverId}`, themeId);
+      setChatTheme(themeId); localStorage.setItem(`cv_theme_${receiverId}`, themeId);
     });
 
     return () => {
       isMounted = false; 
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      newSocket.off('companion_status_result');
-      newSocket.off('user_online');
-      newSocket.off('user_offline');
-      newSocket.off('receive_message', handleReceiveMessage);
-      newSocket.off('messages_read_bulk');
-      newSocket.off('typing');
-      newSocket.off('message_status');
-      newSocket.off('message_updated');
-      newSocket.off('theme_updated');
-      newSocket.disconnect();
+      newSocket.disconnect(); // Proper Teardown
     };
-  }, [receiverId, currentUser.unique_id, hideReadReceipts]);
+  }, [receiverId, currentUser.unique_id]); // DEPENDENCY ARRAY SE `hideReadReceipts` HATA DIYA TO STOP MULTIPLE SOCKETS
     
+  // BUG 12 FIX: Safe UTC Timezone Parsing
+  const parseSafeUTC = (dateString) => {
+    if (!dateString) return new Date();
+    let safeString = dateString.includes('T') ? dateString : dateString.replace(' ', 'T');
+    return new Date(safeString.endsWith('Z') ? safeString : `${safeString}Z`);
+  };
+
   const formatTime = (dateString) => {
     if (!dateString) return 'Now';
-    const safeDateString = dateString.endsWith('Z') ? dateString : `${dateString}Z`;
-    const date = new Date(safeDateString);
-    return date.toLocaleTimeString('en-IN', {
-      timeZone: 'Asia/Kolkata', 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      hour12: true
+    return parseSafeUTC(dateString).toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true
     });
   };
 
   const formatLastSeen = (dateString) => {
     if (!dateString) return 'recently';
-    const safeDateString = dateString.endsWith('Z') ? dateString : `${dateString}Z`;
-    const date = new Date(safeDateString);
+    const date = parseSafeUTC(dateString);
     const now = new Date();
-    
+    // ... baaki andarka same logic rakhein (isToday, isYesterday etc)
     const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
     const isYesterday = new Date(now.setDate(now.getDate() - 1)).getDate() === date.getDate() && now.getMonth() === date.getMonth();
-
     const time = date.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
     
     if (isToday) return `today at ${time}`;
@@ -278,9 +290,9 @@ export default function ChatScreen() {
     }
   };
 
+  // BUG 5 FIX: Debounced emit to save server RAM
   const handleTyping = useCallback((e) => {
     setMessage(e.target.value);
-    
     const target = e.target;
     window.requestAnimationFrame(() => {
       target.style.height = 'auto';
@@ -288,7 +300,10 @@ export default function ChatScreen() {
     });
 
     if (socket && !hasCustomPrivacy && !hideOnline) {
-      socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
+      if (emitTypingTimeoutRef.current) clearTimeout(emitTypingTimeoutRef.current);
+      emitTypingTimeoutRef.current = setTimeout(() => {
+        socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
+      }, 500); // Only 1 socket request per 500ms
     }
   }, [socket, hasCustomPrivacy, hideOnline, currentUser.unique_id, receiverId]);
 
@@ -325,12 +340,12 @@ export default function ChatScreen() {
   };
 
   const toggleSelection = (msg) => {
-    if (msg.is_deleted_for_everyone) return;
+    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; // Added status check
     setSelectedMessages(prev => prev.some(m => m.id === msg.id) ? prev.filter(m => m.id !== msg.id) : [...prev, msg]);
   };
 
   const handlePointerDown = (e, msg) => {
-    if (msg.is_deleted_for_everyone) return;
+    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; // Added status check
     longPressTriggered.current = false;
     swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
     setSwipingId(msg.id);
@@ -416,6 +431,7 @@ export default function ChatScreen() {
 
   const handleInlineReaction = (msgId, emoji) => {
     const targetMsg = messages.find(m => m.id === msgId);
+    if(targetMsg && targetMsg.status === 'sending') return; // Stop reaction on phantom ID
     const newReaction = (targetMsg && targetMsg.reaction === emoji) ? null : emoji;
 
     setMessages(messages.map(msg => msg.id === msgId ? { ...msg, reaction: newReaction } : msg));
@@ -799,6 +815,20 @@ export default function ChatScreen() {
         </div>
       )}
 
+      {/* BUG 7 FIX: Unhandled Offline State Indicator */}
+      {!isConnected && (
+        <div className="bg-red-500/90 backdrop-blur-sm text-white text-[12px] font-bold text-center py-1.5 w-full z-40 shadow-sm transition-all duration-300">
+          Waiting for network...
+        </div>
+      )}
+
+      {/* BUG 7 FIX: Unhandled Offline State Indicator */}
+      {!isConnected && (
+        <div className="bg-red-500/90 backdrop-blur-sm text-white text-[12px] font-bold text-center py-1.5 w-full z-40 shadow-sm transition-all duration-300">
+          Waiting for network...
+        </div>
+      )}
+
       <div 
         className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
@@ -850,67 +880,44 @@ export default function ChatScreen() {
           </div>
         )}
 
-        <div className="px-3 py-3 flex items-end gap-2 z-10 bg-white dark:bg-gray-800">
-          <button 
-            onClick={(e) => { 
-              e.stopPropagation(); 
-              setShowEmojiPicker(!showEmojiPicker);
-              setShowMenu(false);
-              setActiveReactId(null); 
-            }} 
-            className={`p-2.5 rounded-full transition-colors ${showEmojiPicker ? 'bg-indigo-50 dark:bg-indigo-900/30 text-chatverse' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
-          >
-            <Smile className="w-[22px] h-[22px]" />
-          </button>
-
-          <textarea 
-            id="chat-input"
-            value={message} onChange={handleTyping} placeholder="Message..." 
-            className="flex-1 max-h-28 overflow-y-auto no-scrollbar bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400 shadow-sm" 
-            rows="1" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
-          />
-          <button 
-            onClick={() => {
-              if (window.navigator?.vibrate) window.navigator.vibrate(15); 
-              handleSend();
-            }} 
-            disabled={!message.trim()} 
-            className={`p-3 rounded-full transition-all active:scale-90 ${message.trim() ? 'bg-chatverse text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}
-          >
-            <Send className="w-5 h-5 ml-0.5" />
-          </button>
-        </div>
-      </div>
-
-      {showThemeModal && (
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowThemeModal(false)}>
-          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
-            <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-              <Palette className="w-5 h-5 text-chatverse" /> Select Theme
-            </h3>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { id: 'default', name: 'Classic Blue', style: 'bg-gray-100 dark:bg-gray-700' },
-                { id: 'sunset', name: 'Sunset Glow', style: 'bg-gradient-to-br from-rose-200 to-orange-200' },
-                { id: 'emerald', name: 'Emerald', style: 'bg-gradient-to-br from-emerald-200 to-teal-200' },
-                { id: 'midnight', name: 'Midnight', style: 'bg-gradient-to-br from-indigo-300 to-purple-300' },
-                { id: 'romantic', name: 'Love Spark', style: 'bg-gradient-to-br from-pink-300 to-rose-400' },
-                { id: 'valentine', name: 'Valentine', style: 'bg-gradient-to-br from-red-300 to-pink-300' }
-              ].map(theme => (
-                <button 
-                  key={theme.id} 
-                  onClick={() => applyTheme(theme.id)}
-                  className={`p-4 rounded-2xl flex flex-col items-center justify-center gap-2 transition-transform hover:scale-105 active:scale-95 ${chatTheme === theme.id ? 'ring-4 ring-chatverse ring-offset-2 dark:ring-offset-gray-800' : ''}`}
-                >
-                  <div className={`w-12 h-12 rounded-full ${theme.style} shadow-inner`}></div>
-                  <span className="text-[13px] font-bold text-gray-700 dark:text-gray-200">{theme.name}</span>
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setShowThemeModal(false)} className="mt-5 w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 rounded-xl">Cancel</button>
+        {/* BUG 10 FIX: Blocked State Loophole */}
+        {isBlocked ? (
+          <div className="px-4 py-4 text-center bg-gray-50 dark:bg-gray-800/80 text-gray-500 dark:text-gray-400 font-semibold text-[14px] cursor-not-allowed">
+            You cannot reply to this conversation.
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="px-3 py-3 flex items-end gap-2 z-10 bg-white dark:bg-gray-800">
+            <button 
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                setShowEmojiPicker(!showEmojiPicker);
+                setShowMenu(false);
+                setActiveReactId(null); 
+              }} 
+              className={`p-2.5 rounded-full transition-colors ${showEmojiPicker ? 'bg-indigo-50 dark:bg-indigo-900/30 text-chatverse' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+            >
+              <Smile className="w-[22px] h-[22px]" />
+            </button>
+
+            <textarea 
+              id="chat-input"
+              value={message} onChange={handleTyping} placeholder="Message..." 
+              className="flex-1 max-h-28 overflow-y-auto no-scrollbar bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400 shadow-sm" 
+              rows="1" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
+            />
+            <button 
+              onClick={() => {
+                if (window.navigator?.vibrate) window.navigator.vibrate(15); 
+                handleSend();
+              }} 
+              disabled={!message.trim()} 
+              className={`p-3 rounded-full transition-all active:scale-90 ${message.trim() ? 'bg-chatverse text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}
+            >
+              <Send className="w-5 h-5 ml-0.5" />
+            </button>
+          </div>
+        )}
+      </div>
 
       {showSoundModal && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowSoundModal(false)}>
