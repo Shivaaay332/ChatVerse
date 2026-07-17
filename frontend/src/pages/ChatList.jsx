@@ -26,13 +26,14 @@ export default function ChatList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   
+  // NEW FIX: Cache Keys mapped to specific User ID to prevent Privacy Leaks
   const [recentChats, setRecentChats] = useState(() => {
-    const cached = localStorage.getItem('chatverse_cached_recentChats');
+    const cached = localStorage.getItem(`chatverse_cached_recentChats_${currentUser.unique_id}`);
     return cached ? JSON.parse(cached) : [];
   });
   
   const [friendsList, setFriendsList] = useState(() => {
-    const cached = localStorage.getItem('chatverse_cached_friendsList');
+    const cached = localStorage.getItem(`chatverse_cached_friendsList_${currentUser.unique_id}`);
     return cached ? JSON.parse(cached) : [];
   });
   
@@ -66,13 +67,15 @@ export default function ChatList() {
       const chatRes = await api.get('/chats/recent');
       if (isMountedRef.current) {
         setRecentChats(chatRes.data);
-        localStorage.setItem('chatverse_cached_recentChats', JSON.stringify(chatRes.data)); 
+        // NEW FIX: Save with Unique ID
+        localStorage.setItem(`chatverse_cached_recentChats_${currentUser.unique_id}`, JSON.stringify(chatRes.data)); 
       }
       
       const friendRes = await api.get('/friends');
       if (isMountedRef.current) {
         setFriendsList(friendRes.data);
-        localStorage.setItem('chatverse_cached_friendsList', JSON.stringify(friendRes.data)); 
+        // NEW FIX: Save with Unique ID
+        localStorage.setItem(`chatverse_cached_friendsList_${currentUser.unique_id}`, JSON.stringify(friendRes.data)); 
         setLoading(false);
       }
     } catch (err) {
@@ -128,7 +131,7 @@ export default function ChatList() {
           if (chatIndex > -1) {
             const updatedChat = { 
               ...prevChats[chatIndex], 
-              last_message: message.text || "📷 Attachment",
+              last_message: message.text || message.content || "📷 Attachment",
               last_message_time: new Date().toISOString(),
               unread_count: senderId !== currentUser.unique_id 
                             ? Number(prevChats[chatIndex].unread_count || 0) + 1 
@@ -138,22 +141,23 @@ export default function ChatList() {
             newChats.splice(chatIndex, 1);
             newChats.unshift(updatedChat); 
             return newChats;
+          } else {
+            // NEW FIX: Agar completely NAYA user message kare, SIRF TABHI backend ko hit karo
+            if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+            fetchTimeoutRef.current = setTimeout(() => {
+              if (isMountedRef.current) fetchChatsAndFriends();
+            }, 1000);
+            return prevChats;
           }
-          return prevChats;
         });
       }
-
-      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
-      fetchTimeoutRef.current = setTimeout(() => {
-        if (isMountedRef.current) fetchChatsAndFriends();
-      }, 1000); 
+      
+      // Removed the brutal fetchTimeoutRef from here completely to prevent DDoS
     });
 
     newSocket.on('message_updated', () => {
-      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
-      fetchTimeoutRef.current = setTimeout(() => {
-        if (isMountedRef.current) fetchChatsAndFriends();
-      }, 500);
+      // FIX: Sirf UI refresh ke liye trigger karo agar status check zaroori ho, 
+      // otherwise hum is API call ko remove kar rahe hain taaki DB safe rahe.
     });
 
     newSocket.on('typing', (senderId) => {
@@ -178,15 +182,20 @@ export default function ChatList() {
   }, [currentUser.unique_id]);
 
   // Yeh missing ho gaya tha! (Search logic)
+  // NEW FIX: Memory leak protection in Search
   useEffect(() => {
     const delay = setTimeout(async () => {
       if (searchQuery.trim().length > 0) {
-        setLoading(true);
+        if (isMountedRef.current) setLoading(true);
         try {
           const res = await api.get(`/users/search?query=${searchQuery}`);
-          setSearchResults(res.data);
-        } catch (error) {} finally { setLoading(false); }
-      } else { setSearchResults([]); }
+          if (isMountedRef.current) setSearchResults(res.data);
+        } catch (error) {} finally { 
+          if (isMountedRef.current) setLoading(false); 
+        }
+      } else { 
+        if (isMountedRef.current) setSearchResults([]); 
+      }
     }, 500);
     return () => clearTimeout(delay);
   }, [searchQuery]);
