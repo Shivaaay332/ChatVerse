@@ -40,6 +40,11 @@ export default function ChatList() {
   const searchInputRef = useRef(null);
   const [typingUsers, setTypingUsers] = useState({});
   const typingTimeouts = useRef({});
+  
+  // 👇 FIX: API Spam aur Race conditions rokne ke liye naye Refs
+  const fetchTimeoutRef = useRef(null);
+  const deletedChatsRef = useRef(new Set());
+  const swipeStartRef = useRef({ x: 0, y: 0, pointerId: null });
 
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -67,6 +72,7 @@ export default function ChatList() {
   };
 
   useEffect(() => {
+    let isMounted = true; // FIX: Memory leak roko
     fetchChatsAndFriends();
     const newSocket = io(SOCKET_URL);
     newSocket.emit('join', currentUser.unique_id);
@@ -76,21 +82,37 @@ export default function ChatList() {
     });
 
     newSocket.on('sync_complete', (syncedChats) => {
-      setRecentChats(syncedChats);
+      if (!isMounted) return;
+      // FIX: Jo chat delete ho chuki hai, use wapas sync hone se roko
+      setRecentChats(syncedChats.filter(c => !deletedChatsRef.current.has(c.unique_id)));
     });
 
-    newSocket.on('receive_message', () => { fetchChatsAndFriends(); });
-    newSocket.on('message_updated', () => { fetchChatsAndFriends(); });
+    // FIX: Debounce logic to prevent API DDoS attack on server
+    const debouncedFetch = () => {
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+      fetchTimeoutRef.current = setTimeout(() => {
+        if (isMounted) fetchChatsAndFriends();
+      }, 1500); 
+    };
+
+    newSocket.on('receive_message', debouncedFetch);
+    newSocket.on('message_updated', debouncedFetch);
 
     newSocket.on('typing', (senderId) => {
+      if (!isMounted) return;
       setTypingUsers(prev => ({ ...prev, [senderId]: true }));
       if (typingTimeouts.current[senderId]) clearTimeout(typingTimeouts.current[senderId]);
       typingTimeouts.current[senderId] = setTimeout(() => {
-        setTypingUsers(prev => ({ ...prev, [senderId]: false }));
+        if (isMounted) setTypingUsers(prev => ({ ...prev, [senderId]: false }));
       }, 2000);
     });
 
-    return () => newSocket.disconnect();
+    return () => {
+      isMounted = false;
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+      Object.values(typingTimeouts.current).forEach(clearTimeout); // Clear all typing timeouts
+      newSocket.disconnect();
+    };
   }, [currentUser.unique_id]);
 
   useEffect(() => {
@@ -108,7 +130,8 @@ export default function ChatList() {
 
   const handlePointerDown = (e, chat) => {
     longPressTriggered.current = false;
-    touchStartPos.current = { x: e.clientX, y: e.clientY };
+    // FIX: Multi-touch conflicts rokne ke liye pointerId track kiya
+    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
     pressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
       setLongPressedChat(chat);
@@ -117,8 +140,10 @@ export default function ChatList() {
   };
 
   const handlePointerMove = (e) => {
-    const dx = Math.abs(e.clientX - touchStartPos.current.x);
-    const dy = Math.abs(e.clientY - touchStartPos.current.y);
+    // FIX: Sirf usi finger ko track karo jisne touch shuru kiya
+    if (e.pointerId !== swipeStartRef.current.pointerId) return;
+    const dx = Math.abs(e.clientX - swipeStartRef.current.x);
+    const dy = Math.abs(e.clientY - swipeStartRef.current.y);
     if ((dx > 10 || dy > 10) && pressTimer.current) {
       clearTimeout(pressTimer.current);
     }
@@ -138,22 +163,40 @@ export default function ChatList() {
 
   const confirmDeleteChat = async () => {
     if (!longPressedChat) return;
+    
+    const chatId = longPressedChat.unique_id;
+    deletedChatsRef.current.add(chatId); // FIX: Deleted chat ko record karo sync filter ke liye
+    
+    setRecentChats(prev => prev.filter(chat => chat.unique_id !== chatId));
+    setLongPressedChat(null);
+    
     try {
-      await api.delete(`/chats/${longPressedChat.unique_id}`);
-      setRecentChats(prev => prev.filter(chat => chat.unique_id !== longPressedChat.unique_id));
-      setLongPressedChat(null);
+      await api.delete(`/chats/${chatId}`);
     } catch (err) {
+      // Revert if API fails
+      deletedChatsRef.current.delete(chatId); 
+      fetchChatsAndFriends();
       alert("Failed to delete chat.");
     }
   };
 
   const processedChats = useMemo(() => {
+    // FIX: Render loop ke bahar sirf ek baar saare favorites padh lo
+    const favSet = new Set();
+    recentChats.forEach(chat => {
+      if (localStorage.getItem(`cv_fav_${chat.unique_id}`) === 'true') favSet.add(chat.unique_id);
+    });
+
     return [...recentChats].sort((a, b) => {
-      const isAFav = localStorage.getItem(`cv_fav_${a.unique_id}`) === 'true';
-      const isBFav = localStorage.getItem(`cv_fav_${b.unique_id}`) === 'true';
+      const isAFav = favSet.has(a.unique_id);
+      const isBFav = favSet.has(b.unique_id);
       if (isAFav && !isBFav) return -1;
       if (!isAFav && isBFav) return 1;
-      return 0; 
+      
+      // FIX: Pinned chats ke baad, latest message time ke hisaab se sort karo (pehle ye missing tha)
+      const timeA = new Date(a.last_message_time || 0).getTime();
+      const timeB = new Date(b.last_message_time || 0).getTime();
+      return timeB - timeA;
     });
   }, [recentChats]);
 
@@ -230,10 +273,11 @@ export default function ChatList() {
                 return (
                   <div 
                     key={user.unique_id} 
-                    onPointerDown={(e) => handlePointerDown(e, user)}
+                    // FIX: Capture pointer and remove onPointerLeave
+                    onPointerDown={(e) => { e.currentTarget.setPointerCapture?.(e.pointerId); handlePointerDown(e, user); }}
                     onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUpOrLeave}
-                    onPointerLeave={handlePointerUpOrLeave}
+                    onPointerUp={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(); }}
+                    onPointerCancel={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(); }}
                     onClick={(e) => handleChatClick(e, user)}
                     className={`group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-all active:scale-[0.98] active:opacity-70 border-b border-gray-50 dark:border-gray-700 last:border-0 ${hasStar ? 'bg-indigo-50/20 dark:bg-indigo-950/10' : ''} ${longPressedChat?.unique_id === user.unique_id ? 'bg-gray-100 dark:bg-gray-700' : ''}`}
                   >

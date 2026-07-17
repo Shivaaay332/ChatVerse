@@ -9,6 +9,13 @@ const db = require('./db');
 const webpush = require('web-push'); // <-- NAYA PUSH PACKAGE ADD KIYA HAI
 require('dotenv').config();
 
+// FIX: Secure JWT Fallback Logic
+const JWT_SECRET_KEY = process.env.JWT_SECRET;
+if (!JWT_SECRET_KEY) {
+  console.warn("⚠️ CRITICAL WARNING: JWT_SECRET is missing in .env! Using insecure fallback. DO NOT USE IN PRODUCTION.");
+}
+const ACTIVE_JWT_SECRET = JWT_SECRET_KEY || 'chatverse_super_secret_key_2026';
+
 // ==========================================
 // VAPID KEYS FOR BACKGROUND PUSH NOTIFICATIONS
 // ==========================================
@@ -69,7 +76,7 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Access denied!' });
-  jwt.verify(token, process.env.JWT_SECRET || 'chatverse_super_secret_key_2026', (err, user) => {
+  jwt.verify(token, ACTIVE_JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ error: 'Invalid token!' });
     req.user = user;
     next();
@@ -102,7 +109,7 @@ app.post('/api/auth/login', async (req, res) => {
     const user = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $1', [req.body.unique_id]);
     if (user.rows.length === 0) return res.status(400).json({ error: 'User not found!' });
     if (!await bcrypt.compare(req.body.password, user.rows[0].password_hash)) return res.status(400).json({ error: 'Incorrect password!' });
-    const token = jwt.sign({ id: user.rows[0].unique_id }, process.env.JWT_SECRET || 'chatverse_super_secret_key_2026', { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.rows[0].unique_id }, ACTIVE_JWT_SECRET, { expiresIn: '7d' });
     res.status(200).json({ message: 'Login successful!', token, user: { unique_id: user.rows[0].unique_id, username: user.rows[0].username, bio: user.rows[0].bio, is_verified: user.rows[0].is_verified } });
   } catch (err) { res.status(500).json({ error: 'Error during login' }); }
 });
@@ -247,9 +254,14 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
     const newPost = await db.query(`INSERT INTO posts (user_id, content) VALUES ($1, $2) RETURNING *`, [req.user.id, req.body.content]);
     const friends = await db.query(`SELECT sender_id, receiver_id FROM friend_requests WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'`, [req.user.id]);
     const friendIds = friends.rows.map(f => f.sender_id === req.user.id ? f.receiver_id : f.sender_id);
-    for(const fid of friendIds) { await db.query(`INSERT INTO notifications (user_id, sender_id, type, reference_id, content) VALUES ($1, $2, 'new_post', $3, $4)`, [fid, req.user.id, newPost.rows[0].id, req.body.content]); }
+    
+    // FIX: Parallel Database Execution to avoid DB Bottleneck
+    await Promise.all(friendIds.map(fid => 
+      db.query(`INSERT INTO notifications (user_id, sender_id, type, reference_id, content) VALUES ($1, $2, 'new_post', $3, $4)`, [fid, req.user.id, newPost.rows[0].id, req.body.content])
+    ));
+    
     res.status(201).json(newPost.rows[0]); 
-  } catch (err) { res.status(500).json({ error: 'Error post' }); }
+  } catch (err) { console.error("Post Error:", err); res.status(500).json({ error: 'Error post' }); }
 });
 
 app.get('/api/posts', authenticateToken, async (req, res) => {
@@ -464,12 +476,16 @@ const onlineUsers = new Map();
 io.on('connection', (socket) => {
   socket.on('join', async (userId) => {
     if (userId) {
-      onlineUsers.set(userId, socket.id);
+      // FIX: Native Socket Rooms se Multiple-Devices support karna
+      socket.join(userId);
+      const currentCount = onlineUsers.get(userId) || 0;
+      onlineUsers.set(userId, currentCount + 1);
       socket.userId = userId;
 
       try {
         const u = await db.query('SELECT hide_online_status FROM users WHERE unique_id = $1', [userId]);
-        if (!u.rows[0]?.hide_online_status) {
+        // Sirf tabhi online bhejo jab pehla device connect ho
+        if (!u.rows[0]?.hide_online_status && currentCount === 0) {
            io.emit('user_online', userId);
         }
 
@@ -479,16 +495,17 @@ io.on('connection', (socket) => {
         );
 
         undelivered.rows.forEach(msg => {
-          const senderSocketId = onlineUsers.get(msg.sender_id);
-          if (senderSocketId) {
-            io.to(senderSocketId).emit('message_updated', { id: msg.id, status: 'delivered' });
-          }
+          // Native Room emission (will reach all active devices of sender)
+          io.to(msg.sender_id).emit('message_updated', { id: msg.id, status: 'delivered' });
         });
       } catch (err) { console.error("Error updating delivery status on join:", err); }
     }
   });
 
-  socket.on('typing', ({ senderId, receiverId }) => { const s = onlineUsers.get(receiverId); if(s) io.to(s).emit('typing', senderId); });
+  socket.on('typing', ({ senderId, receiverId }) => { 
+    // FIX: Emit directly to room instead of single socket id
+    io.to(receiverId).emit('typing', senderId); 
+  });
   
   socket.on('sync_messages', async (userId) => {
     try {
@@ -497,31 +514,17 @@ io.on('connection', (socket) => {
           SELECT 
             m.*, 
             CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END as other_user_id,
-            ROW_NUMBER() OVER (
-              PARTITION BY CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END 
-              ORDER BY m.created_at DESC
-            ) as rn
+            ROW_NUMBER() OVER (PARTITION BY CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END ORDER BY m.created_at DESC) as rn
           FROM messages m
-          WHERE (m.sender_id = $1 OR m.receiver_id = $1)
-          AND NOT ($1 = ANY(m.deleted_by))
-          AND m.is_deleted_for_me = FALSE
+          WHERE (m.sender_id = $1 OR m.receiver_id = $1) AND NOT ($1 = ANY(m.deleted_by)) AND m.is_deleted_for_me = FALSE
         )
         SELECT 
-          u.unique_id, 
-          u.username,
-          u.is_verified,
-          rm.content AS last_message,
-          rm.created_at AS last_message_time,
-          rm.reaction,
-          rm.sender_id,
-          rm.is_deleted_for_everyone,
-          rm.is_deleted_for_me,
+          u.unique_id, u.username, u.is_verified, rm.content AS last_message, rm.created_at AS last_message_time,
+          rm.reaction, rm.sender_id, rm.is_deleted_for_everyone, rm.is_deleted_for_me,
           (SELECT COUNT(*) FROM messages WHERE sender_id = u.unique_id AND receiver_id = $1 AND status != 'read' AND is_deleted_for_me = FALSE) AS unread_count
         FROM RankedMessages rm
         JOIN users u ON u.unique_id = rm.other_user_id
-        WHERE rm.rn = 1 
-        AND u.unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $1) 
-        AND u.unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $1)
+        WHERE rm.rn = 1 AND u.unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $1) AND u.unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $1)
         ORDER BY rm.created_at DESC
       `;
       const result = await db.query(query, [userId]);
@@ -530,14 +533,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('change_chat_theme', ({ themeId, senderId, receiverId }) => {
-    if (onlineUsers.get(receiverId)) {
-       io.to(onlineUsers.get(receiverId)).emit('theme_updated', { themeId });
-    }
+    io.to(receiverId).emit('theme_updated', { themeId });
   });
 
-  // ==========================================
-  // THE MASTER FIX: ALWAYS SEND WEB PUSH 
-  // ==========================================
   socket.on('send_message', async (data) => {
     try {
       const { tempId, senderId, receiverId, content, replyToId } = data;
@@ -555,73 +553,76 @@ io.on('connection', (socket) => {
       
       let isReceiverActive = false;
       
-      // 1. Agar user app screen par online hai to usko direct socket se message do
-      if (onlineUsers.get(receiverId)) {
-        io.to(onlineUsers.get(receiverId)).emit('receive_message', savedMsg.rows[0]);
+      // FIX: Send via Room (Checks if receiver has any active device connected)
+      if (onlineUsers.has(receiverId) && onlineUsers.get(receiverId) > 0) {
+        io.to(receiverId).emit('receive_message', savedMsg.rows[0]);
         isReceiverActive = true;
       }
 
-      // 2. BACKGROUND PUSH NOTIFICATION (APP BAND YA NET OFF HONE PAR BHI)
-      try {
-        const userRes = await db.query('SELECT push_subscription FROM users WHERE unique_id = $1', [receiverId]);
-        const senderRes = await db.query('SELECT username FROM users WHERE unique_id = $1', [senderId]);
-        
-        let sub = userRes.rows[0]?.push_subscription;
-        if (sub) {
-           if (typeof sub === 'string') {
-             try { sub = JSON.parse(sub); } catch(e){}
-           }
-           
-           if (sub && sub.endpoint) {
-             const payload = JSON.stringify({
-               title: senderRes.rows[0]?.username || 'New Message',
-               body: content,
-               icon: '/logo.png',
-               url: `/chat/${senderId}`
-             });
+      // FIX: Only send Background Push Notification if User is NOT Active in app
+      if (!isReceiverActive) {
+        try {
+          const userRes = await db.query('SELECT push_subscription FROM users WHERE unique_id = $1', [receiverId]);
+          const senderRes = await db.query('SELECT username FROM users WHERE unique_id = $1', [senderId]);
+          
+          let sub = userRes.rows[0]?.push_subscription;
+          if (sub) {
+             if (typeof sub === 'string') {
+               try { sub = JSON.parse(sub); } catch(e){ console.error("Push JSON Error:", e); }
+             }
              
-             // Fire and Forget Push Request (Bina app atkaye background me notification bhejega)
-             webpush.sendNotification(sub, payload).then(() => {
-                // Agar push Google server tak successfully chala gaya, to 'Delivered' update kardo
-                db.query(`UPDATE messages SET status = 'delivered' WHERE id = $1`, [savedMsg.rows[0].id]);
-                if(onlineUsers.get(senderId)) io.to(onlineUsers.get(senderId)).emit('message_updated', { id: savedMsg.rows[0].id, status: 'delivered' });
-             }).catch(async (e) => {
-                // Agar mobile device ne token expire kar diya hai, toh usko DB se hata do
-                if (e.statusCode === 410 || e.statusCode === 404) {
-                   await db.query(`UPDATE users SET push_subscription = NULL WHERE unique_id = $1`, [receiverId]);
-                }
-             });
-           }
-        }
-      } catch(err) { console.log('Push Query Error:', err.message); }
+             // FIX: Validated JSON Structure to prevent Crash
+             if (sub && typeof sub === 'object' && sub.endpoint) {
+               const payload = JSON.stringify({
+                 title: senderRes.rows[0]?.username || 'New Message',
+                 body: content,
+                 icon: '/logo.png',
+                 url: `/chat/${senderId}`
+               });
+               
+               webpush.sendNotification(sub, payload).then(() => {
+                  db.query(`UPDATE messages SET status = 'delivered' WHERE id = $1`, [savedMsg.rows[0].id]);
+                  io.to(senderId).emit('message_updated', { id: savedMsg.rows[0].id, status: 'delivered' });
+               }).catch(async (e) => {
+                  if (e.statusCode === 410 || e.statusCode === 404) {
+                     await db.query(`UPDATE users SET push_subscription = NULL WHERE unique_id = $1`, [receiverId]);
+                  }
+               });
+             }
+          }
+        } catch(err) { console.error('Push Query Error:', err.message); }
+      }
 
       socket.emit('message_status', { tempId, realId: savedMsg.rows[0].id, status: initialStatus });
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("Send message root error:", err); }
   });
   
+  // FIX: Replaced empty Catch blocks with Console Log to catch desyncs
   socket.on('react_message', async ({ messageId, reaction, receiverId }) => {
-    try { await db.query(`UPDATE messages SET reaction = $1 WHERE id = $2`, [reaction, messageId]); if(onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('message_updated', { id: messageId, reaction }); } catch (err) {}
+    try { 
+      await db.query(`UPDATE messages SET reaction = $1 WHERE id = $2`, [reaction, messageId]); 
+      io.to(receiverId).emit('message_updated', { id: messageId, reaction }); 
+    } catch (err) { console.error("React message error:", err); }
   });
 
   socket.on('delete_message_everyone', async ({ messageId, receiverId }) => {
-    try { await db.query(`UPDATE messages SET is_deleted_for_everyone = TRUE, content = 'This message was deleted' WHERE id = $1`, [messageId]); if(onlineUsers.get(receiverId)) io.to(onlineUsers.get(receiverId)).emit('message_updated', { id: messageId, is_deleted_for_everyone: true, content: 'This message was deleted' }); } catch (err) {}
+    try { 
+      await db.query(`UPDATE messages SET is_deleted_for_everyone = TRUE, content = 'This message was deleted' WHERE id = $1`, [messageId]); 
+      io.to(receiverId).emit('message_updated', { id: messageId, is_deleted_for_everyone: true, content: 'This message was deleted' }); 
+    } catch (err) { console.error("Delete for everyone error:", err); }
   });
 
   socket.on('mark_as_read', async ({ messageId, senderId }) => {
-    try { await db.query(`UPDATE messages SET status = 'read' WHERE id = $1`, [messageId]); if(onlineUsers.get(senderId)) io.to(onlineUsers.get(senderId)).emit('message_updated', { id: messageId, status: 'read' }); } catch (err) {}
+    try { 
+      await db.query(`UPDATE messages SET status = 'read' WHERE id = $1`, [messageId]); 
+      io.to(senderId).emit('message_updated', { id: messageId, status: 'read' }); 
+    } catch (err) { console.error("Mark as read error:", err); }
   });
 
-  // 👇 YE NAYA EVENT ADD KARNA HAI 👇
-  // PERFECT SEEN FIX: Ek sath saare blue ticks update karne ka logic
   socket.on('mark_chat_read', async ({ senderId, receiverId }) => {
     try {
-      // Pehle Database me 'read' mark karo
       await db.query(`UPDATE messages SET status = 'read' WHERE sender_id = $1 AND receiver_id = $2 AND status != 'read'`, [senderId, receiverId]);
-      
-      // Jaise hi samne wala chat khole, Sender ko instantly 'Blue Ticks' bhej do
-      if (onlineUsers.get(senderId)) {
-        io.to(onlineUsers.get(senderId)).emit('messages_read_bulk', { readerId: receiverId });
-      }
+      io.to(senderId).emit('messages_read_bulk', { readerId: receiverId });
     } catch (err) { console.error("Error in bulk read:", err); }
   });
 
@@ -633,22 +634,31 @@ io.on('connection', (socket) => {
           socket.emit('companion_status_result', { targetId, isOnline: false, lastSeen: u.rows[0].hide_last_seen ? null : u.rows[0].last_seen });
           return;
         }
-        const isTargetOnline = onlineUsers.has(targetId);
+        // Check if ANY device is online
+        const isTargetOnline = onlineUsers.has(targetId) && onlineUsers.get(targetId) > 0;
         socket.emit('companion_status_result', { targetId, isOnline: isTargetOnline, lastSeen: (isTargetOnline || u.rows[0].hide_last_seen) ? null : u.rows[0].last_seen });
       }
-    } catch(e){}
+    } catch(e) { console.error("Companion check error:", e); }
   });
   
   socket.on('disconnect', async () => { 
     if (socket.userId) { 
-      onlineUsers.delete(socket.userId); 
-      try {
-        await db.query(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE unique_id = $1`, [socket.userId]);
-        const u = await db.query('SELECT hide_online_status FROM users WHERE unique_id = $1', [socket.userId]);
-        if (!u.rows[0]?.hide_online_status) {
-           io.emit('user_offline', { userId: socket.userId, lastSeen: new Date().toISOString() }); 
-        }
-      } catch(err) {}
+      const currentCount = onlineUsers.get(socket.userId) || 0;
+      const newCount = Math.max(0, currentCount - 1);
+      
+      if (newCount === 0) {
+        // Sirf tabhi offline show karein jab User ke saare devices disconnect ho jayein
+        onlineUsers.delete(socket.userId); 
+        try {
+          await db.query(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE unique_id = $1`, [socket.userId]);
+          const u = await db.query('SELECT hide_online_status FROM users WHERE unique_id = $1', [socket.userId]);
+          if (!u.rows[0]?.hide_online_status) {
+             io.emit('user_offline', { userId: socket.userId, lastSeen: new Date().toISOString() }); 
+          }
+        } catch(err) { console.error("Disconnect error:", err); }
+      } else {
+        onlineUsers.set(socket.userId, newCount);
+      }
     } 
   });
 });

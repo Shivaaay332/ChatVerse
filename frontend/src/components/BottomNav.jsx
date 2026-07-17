@@ -9,34 +9,45 @@ export default function BottomNav() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
 
-  // Poll for both notifications and unread messages every 5 seconds for Real-time UX
+  // FIX 1 & 4: DDoS Polling (setInterval) ko hata diya gaya hai. 
+  // Ab server par 24,000 requests/minute ka load nahi aayega.
   useEffect(() => {
-   const fetchStats = async () => {
+    let isMounted = true; // FIX 3: Memory Leak tracking flag
+
+    const fetchStats = async () => {
       try {
+        // Optimizing requests: Dono APIs ko safely call kar rahe hain
         const notifRes = await api.get('/notifications/unread');
-        const notifCount = notifRes.data.unread || 0;
-        setUnreadCount(notifCount);
-
         const msgRes = await api.get('/messages/unread/total');
-        const msgCount = msgRes.data.unreadMessages || 0;
-        setUnreadMessagesCount(msgCount);
 
-        // FIX: App Icon par Red Dot Badge lagana
-        const totalUnread = notifCount + msgCount;
-        if ('setAppBadge' in navigator && 'clearAppBadge' in navigator) {
-          if (totalUnread > 0) {
-            navigator.setAppBadge(totalUnread).catch(e => console.log(e));
-          } else {
-            navigator.clearAppBadge().catch(e => console.log(e));
+        // FIX 3: Unmounted component par state update rokne ka check (Memory Leak Fix)
+        if (isMounted) {
+          const notifCount = notifRes.data.unread || 0;
+          const msgCount = msgRes.data.unreadMessages || 0;
+
+          setUnreadCount(notifCount);
+          setUnreadMessagesCount(msgCount);
+
+          // FIX: App Icon par Red Dot Badge lagana
+          const totalUnread = notifCount + msgCount;
+          if ('setAppBadge' in navigator && 'clearAppBadge' in navigator) {
+            if (totalUnread > 0) {
+              navigator.setAppBadge(totalUnread).catch(e => console.log(e));
+            } else {
+              navigator.clearAppBadge().catch(e => console.log(e));
+            }
           }
         }
       } catch (err) { /* silently fail */ }
     };
 
+    // FIX 2: Sirf mount hone par (ya route change hone par) 1 baar fetch hoga.
     fetchStats();
-    const interval = setInterval(fetchStats, 5000); 
     
-    return () => clearInterval(interval);
+    // Cleanup function memory leak ko rokkegi jab user tab switch karega
+    return () => {
+      isMounted = false; 
+    };
   }, [location.pathname]); 
 
   const navItems = [

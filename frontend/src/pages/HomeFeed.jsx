@@ -50,6 +50,21 @@ export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = fals
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
 
+  // 👇 FIX 1: Component unmount tracking (Memory Leak Rokne ke liye)
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  // 👇 FIX 2: Prop Syncing (Taki feed refresh hone par Likes update ho jayein)
+  useEffect(() => {
+    setLiked(post.has_liked === true || post.has_liked === 'true');
+    setLikeCount(Number(post.like_count) || 0);
+    setCommentCount(Number(post.comment_count) || 0);
+    setEditContent(post.content);
+  }, [post]);
+
   const handleProfileClick = (id, username) => {
     if (onClose) onClose();
     if (id === currentUser.unique_id) {
@@ -404,25 +419,29 @@ export default function HomeFeed() {
   const [newPost, setNewPost] = useState('');
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { username: 'Me' };
 
-  const fetchPosts = async () => {
-    try {
-      const res = await api.get('/posts');
-      setPosts(res.data);
-      localStorage.setItem('chatverse_cached_posts', JSON.stringify(res.data));
-    } catch (err) {
-      console.error("Failed to fetch posts");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => { 
+    let isMounted = true; // FIX 4: Safe Unmount Tracker
+    
+    const fetchPosts = async () => {
+      try {
+        const res = await api.get('/posts');
+        if (isMounted) {
+          setPosts(res.data);
+          localStorage.setItem('chatverse_cached_posts', JSON.stringify(res.data));
+        }
+      } catch (err) {
+        console.error("Failed to fetch posts");
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
     fetchPosts(); 
     
-    const feedSocket = io(SOCKET_URL);
-    if (currentUser.unique_id) {
-      feedSocket.emit('join', currentUser.unique_id);
-    }
+    // 👇 FIX 5: Useless aur memory leak failane wala "Ghost Socket" yahan se hata diya gaya hai. 
+    // Isse Battery drain aur backend DDoS attack ki problem khatam ho jayegi.
+    
+    return () => { isMounted = false; };
   }, []);
 
   const handleCreatePost = async () => {
@@ -435,11 +454,21 @@ export default function HomeFeed() {
   };
 
   const updateLocalPost = useCallback((id, newContent) => { 
-    setPosts(prevPosts => prevPosts.map(p => p.id === id ? { ...p, content: newContent } : p)); 
+    setPosts(prevPosts => {
+      const updated = prevPosts.map(p => p.id === id ? { ...p, content: newContent } : p);
+      // 👇 FIX 6: Cache Update (Taaki page refresh pe edit gayab na ho)
+      localStorage.setItem('chatverse_cached_posts', JSON.stringify(updated));
+      return updated;
+    });
   }, []);
   
   const removeLocalPost = useCallback((id) => { 
-    setPosts(prevPosts => prevPosts.filter(p => p.id !== id)); 
+    setPosts(prevPosts => {
+      const filtered = prevPosts.filter(p => p.id !== id);
+      // 👇 FIX 7: Cache Delete (Taaki deleted post wapas ghost ban kar na aaye)
+      localStorage.setItem('chatverse_cached_posts', JSON.stringify(filtered));
+      return filtered;
+    });
   }, []);
 
   return (
