@@ -106,9 +106,11 @@ export default function ChatScreen() {
   const endOfMessagesRef = useRef(null);
   const typingTimeoutRef = useRef(null); 
   const isScrolledUpRef = useRef(false); 
+  const scrollTimeoutRef = useRef(null); // FIX 4: Throttling ke liye naya Ref
   
   // FIX 2: Yeh track karega ki app khulte hi pehla instant scroll ho gaya ya nahi
   const initialScrollDone = useRef(false); 
+  const textareaRef = useRef(null); // FIX 5: Textarea DOM manipulation ke liye naya Ref 
   
   const [newMsgBadge, setNewMsgBadge] = useState(false); 
   const pressTimer = useRef(null);
@@ -130,11 +132,13 @@ export default function ChatScreen() {
     setSocket(newSocket);
 
     // BUG 7 FIX: Connection Status tracking
-    newSocket.on('connect', () => isMounted && setIsConnected(true));
+    newSocket.on('connect', () => {
+      if (isMounted) setIsConnected(true);
+      // FIX 1: Room Joining ko connect listener ke andar daala taaki har reconnect par ye trigger ho
+      newSocket.emit('join', currentUser.unique_id);
+      newSocket.emit('check_companion_status', { targetId: receiverId });
+    });
     newSocket.on('disconnect', () => isMounted && setIsConnected(false));
-
-    newSocket.emit('join', currentUser.unique_id);
-    newSocket.emit('check_companion_status', { targetId: receiverId });
 
     // FIX 1: API aur Socket Race Condition Resolved. 
     api.get(`/messages/${receiverId}`).then(res => {
@@ -201,8 +205,13 @@ export default function ChatScreen() {
             try {
               const toneId = localStorage.getItem(`cv_sound_${receiverId}`) || localStorage.getItem('chatverse_default_tone') || 'ringtone1';
               const audio = new Audio(`/sounds/${toneId}.mp3`);
-              audio.volume = 0.5; audio.play();
-            } catch (e) {}
+              audio.volume = 0.5; 
+              // FIX 2: Handle Audio Promise properly to prevent browser console crashes
+              const playPromise = audio.play();
+              if (playPromise !== undefined) {
+                playPromise.catch(error => console.warn("Audio autoplay blocked by browser policy"));
+              }
+            } catch (e) { console.warn("Audio error:", e); }
           }
           // STRICT SCROLL CHECK
           if (isScrolledUpRef.current) {
@@ -250,6 +259,8 @@ export default function ChatScreen() {
     return () => {
       isMounted = false; 
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      // FIX 3: Clear emit typing timeout to prevent memory leak
+      if (emitTypingTimeoutRef.current) clearTimeout(emitTypingTimeoutRef.current);
       newSocket.disconnect(); // Proper Teardown
     };
   }, [receiverId, currentUser.unique_id]); // DEPENDENCY ARRAY SE `hideReadReceipts` HATA DIYA TO STOP MULTIPLE SOCKETS
@@ -296,21 +307,27 @@ export default function ChatScreen() {
 
   const [showScrollButton, setShowScrollButton] = useState(false);
 
+  // FIX 4: Throttled Scroll logic to save Battery and CPU
   const handleScroll = useCallback((e) => {
+    if (scrollTimeoutRef.current) return; // Agar pehle se process ho raha hai, toh ignore karo
+
     const { scrollTop, clientHeight, scrollHeight } = e.target;
-    const isUp = scrollHeight - scrollTop - clientHeight > 100;
     
-    isScrolledUpRef.current = isUp;
-    
-    setShowScrollButton(prev => {
-      if (prev !== isUp) return isUp;
-      return prev;
-    });
-    
-    if (!isUp && newMsgBadge) {
-      setNewMsgBadge(false);
-    }
-  }, [newMsgBadge]); 
+    scrollTimeoutRef.current = setTimeout(() => {
+      const isUp = scrollHeight - scrollTop - clientHeight > 100;
+      isScrolledUpRef.current = isUp;
+      
+      setShowScrollButton(prev => {
+        if (prev !== isUp) return isUp;
+        return prev;
+      });
+      
+      if (!isUp && newMsgBadge) {
+        setNewMsgBadge(false);
+      }
+      scrollTimeoutRef.current = null; // Timer release karo agle frame ke liye
+    }, 100); // Har 100ms mein sirf ek baar chalega
+  }, [newMsgBadge]);
   
   const scrollToBottom = () => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -336,19 +353,25 @@ export default function ChatScreen() {
   // BUG 5 FIX: Debounced emit to save server RAM
   const handleTyping = useCallback((e) => {
     setMessage(e.target.value);
-    const target = e.target;
+    
+    // FIX 6: User interaction karte hi Stale Unread Badge hata do
+    if (initialUnread.count > 0) setInitialUnread({ count: 0, firstId: null });
+
+    // FIX 5: Direct DOM (`e.target`) ki jagah safely `textareaRef` use karo
     window.requestAnimationFrame(() => {
-      target.style.height = 'auto';
-      target.style.height = `${target.scrollHeight}px`;
+      if (textareaRef.current) {
+         textareaRef.current.style.height = 'auto';
+         textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      }
     });
 
     if (socket && !hasCustomPrivacy && !hideOnline) {
       if (emitTypingTimeoutRef.current) clearTimeout(emitTypingTimeoutRef.current);
       emitTypingTimeoutRef.current = setTimeout(() => {
         socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
-      }, 500); // Only 1 socket request per 500ms
+      }, 500); 
     }
-  }, [socket, hasCustomPrivacy, hideOnline, currentUser.unique_id, receiverId]);
+  }, [socket, hasCustomPrivacy, hideOnline, currentUser.unique_id, receiverId, initialUnread.count]);
 
   const handleSend = () => {
     if (message.trim() === '') return;
@@ -363,10 +386,12 @@ export default function ChatScreen() {
     setMessage('');
     setShowEmojiPicker(false);
 
-    // FIX: Instant height reset without glitch
+    // FIX 6: Send karte hi Stale Unread Badge hata do
+    if (initialUnread.count > 0) setInitialUnread({ count: 0, firstId: null });
+
+    // FIX 5: Safely reset height via Ref
     window.requestAnimationFrame(() => {
-      const textarea = document.getElementById('chat-input');
-      if (textarea) textarea.style.height = 'auto';
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
     });
     
     const replyIdToSend = replyingTo ? replyingTo.id : null;
@@ -496,7 +521,8 @@ export default function ChatScreen() {
     } catch (err) {
       console.error("Delete failed, reverting UI");
       if (messageToRestore) {
-        setMessages((prev) => [...prev, messageToRestore].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+        // FIX 7: Add 'failed_delete' tag to restored message so UI can show a warning
+        setMessages((prev) => [...prev, { ...messageToRestore, failed_delete: true }].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
       }
       alert("Failed to delete message. Please try again.");
     }
@@ -670,6 +696,12 @@ export default function ChatScreen() {
                   
                   <div className="relative text-[15.5px] leading-[1.4] break-words">
                     <span>{msg.content}</span>
+                    
+                    {/* FIX 7: Failed Delete Indicator UI */}
+                    {msg.failed_delete && (
+                       <span className="block text-[11px] text-red-300 font-bold mt-1">⚠️ Failed to delete</span>
+                    )}
+                    
                     {!msg.is_deleted_for_everyone && (
                       <span className={`inline-block h-[14px] ${isMe ? 'w-[85px]' : 'w-[60px]'}`}></span>
                     )}
