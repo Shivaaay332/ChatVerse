@@ -58,11 +58,14 @@ export default function ChatScreen() {
     return cached ? JSON.parse(cached) : [];
   });
 
-  // FIX 2: Background Cache Sync (Har naye message par cache update hoga)
+  // FIX 2: Background Cache Sync with Storage Quota Crash Protection
   useEffect(() => {
     if (messages.length > 0) {
-      // Memory bachane ke liye sirf last 50 messages cache karenge
-      localStorage.setItem(`cv_msgs_${receiverId}`, JSON.stringify(messages.slice(-50)));
+      try {
+        localStorage.setItem(`cv_msgs_${receiverId}`, JSON.stringify(messages.slice(-50)));
+      } catch (err) {
+        console.warn("Storage Quota Exceeded. Failed to cache messages.");
+      }
     }
   }, [messages, receiverId]);
   const [showMenu, setShowMenu] = useState(false);
@@ -106,6 +109,12 @@ export default function ChatScreen() {
   const endOfMessagesRef = useRef(null);
   const typingTimeoutRef = useRef(null); 
   const isScrolledUpRef = useRef(false); 
+  
+  // FIX: Global mount tracker for Async operations (Prevents Memory Leaks)
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
+  }, []); 
   const scrollTimeoutRef = useRef(null); // FIX 4: Throttling ke liye naya Ref
   
   // FIX 2: Yeh track karega ki app khulte hi pehla instant scroll ho gaya ya nahi
@@ -147,7 +156,9 @@ export default function ChatScreen() {
       const fetchedMessages = res.data;
       const unreads = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
       if (unreads.length > 0) {
-        setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
+        const totalUnread = res.headers && res.headers['x-total-unread'] ? parseInt(res.headers['x-total-unread']) : unreads.length;
+        const displayCount = (unreads.length === 50 && totalUnread >= 50) ? '50+' : totalUnread;
+        setInitialUnread({ count: displayCount, firstId: unreads[0].id });
       }
       
       // FIX 2: Sirf API data nahi, balki jo naye message load hote waqt aaye unhe bhi bachao
@@ -281,7 +292,9 @@ export default function ChatScreen() {
   const parseSafeUTC = (dateString) => {
     if (!dateString) return new Date();
     let safeString = dateString.includes('T') ? dateString : dateString.replace(' ', 'T');
-    return new Date(safeString.endsWith('Z') ? safeString : `${safeString}Z`);
+    // FIX: Safe regex check to see if string already contains valid timezone (+/-00:00 or Z)
+    const hasTimezone = /(Z|[+-]\d{2}:\d{2})$/.test(safeString);
+    return new Date(hasTimezone ? safeString : `${safeString}Z`);
   };
 
   const formatTime = (dateString) => {
@@ -373,9 +386,11 @@ export default function ChatScreen() {
     }
   }, [socket, hasCustomPrivacy, hideOnline, currentUser.unique_id, receiverId, initialUnread.count]);
 
-  const handleSend = () => {
+  // FIX: Added useCallback to prevent memory bloat
+  const handleSend = useCallback(() => {
     if (message.trim() === '') return;
-    const tempId = Date.now().toString();
+    // FIX: Unique ID with Random suffix to prevent Duplicate Key DOM Crash
+    const tempId = Date.now().toString() + '-' + Math.random().toString(36).substring(2, 9);
     const newMsg = {
       tempId, id: tempId, sender_id: currentUser.unique_id, receiver_id: receiverId, content: message,
       status: 'sending', created_at: new Date().toISOString(), reaction: null, is_deleted_for_everyone: false, is_deleted_for_me: false,
@@ -405,12 +420,12 @@ export default function ChatScreen() {
       endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
       isScrolledUpRef.current = false;
     }, 50);
-  };
+  }, [message, currentUser.unique_id, receiverId, replyingTo, socket, initialUnread.count]); // FIX: Missing closing bracket aur dependencies add kar di
 
-  const toggleSelection = (msg) => {
-    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; // Added status check
+  const toggleSelection = useCallback((msg) => {
+    if (msg.is_deleted_for_everyone || msg.status === 'sending') return;
     setSelectedMessages(prev => prev.some(m => m.id === msg.id) ? prev.filter(m => m.id !== msg.id) : [...prev, msg]);
-  };
+  }, []);
 
   // FIX 3: Removed setSwipingId React state to stop massive re-renders. Pure DOM manipulation.
   const handlePointerDown = (e, msg) => {
@@ -511,7 +526,8 @@ export default function ChatScreen() {
     setSelectedMessages([]);
   };
 
-  const handleDeleteForMe = async (messageId) => {
+  // FIX: Memory Leak prevention and useCallback optimization
+  const handleDeleteForMe = useCallback(async (messageId) => {
     const messageToRestore = messages.find(m => m.id === messageId);
     setMessages((prev) => prev.filter(msg => msg.id !== messageId));
     setSelectedMessages([]);
@@ -520,13 +536,15 @@ export default function ChatScreen() {
       await api.delete(`/messages/forme/${messageId}`);
     } catch (err) {
       console.error("Delete failed, reverting UI");
-      if (messageToRestore) {
-        // FIX 7: Add 'failed_delete' tag to restored message so UI can show a warning
-        setMessages((prev) => [...prev, { ...messageToRestore, failed_delete: true }].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+      // FIX: Check if component is still mounted before updating state
+      if (isMountedRef.current) {
+        if (messageToRestore) {
+          setMessages((prev) => [...prev, { ...messageToRestore, failed_delete: true }].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+        }
+        alert("Failed to delete message. Please try again.");
       }
-      alert("Failed to delete message. Please try again.");
     }
-  };
+  }, [messages]);
 
   const handleDeleteForEveryone = () => {
     const ids = selectedMessages.filter(m => m.sender_id === currentUser.unique_id).map(m => m.id);
@@ -807,7 +825,12 @@ export default function ChatScreen() {
               setSelectedMessages([]);
             }} className="p-2 hover:bg-white/20 rounded-full"><Star className="w-5 h-5" /></button>
             
-            <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
+            <button onClick={() => { 
+  // FIX: Unhandled Promise Rejection handle kiya gaya
+  navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n'))
+    .catch(err => console.warn("Clipboard access denied", err)); 
+  setSelectedMessages([]); 
+}} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
             
             <button onClick={async () => {
               const idsToDelete = selectedMessages.map(m => m.id);
