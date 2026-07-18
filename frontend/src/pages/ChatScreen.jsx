@@ -1,5 +1,4 @@
-// FIX 1: useLayoutEffect import kiya gaya (Insta-scroll ke liye)
-import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff, Palette, Music, Heart } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -46,28 +45,7 @@ export default function ChatScreen() {
   const [showSoundModal, setShowSoundModal] = useState(false);
   const [previewChatTone, setPreviewChatTone] = useState('');
   const [message, setMessage] = useState('');
-  
-  // FIX 1: Local Cache aur Loading State add kiya
-  const [isLoading, setIsLoading] = useState(() => {
-    const cached = localStorage.getItem(`cv_msgs_${receiverId}`);
-    return !cached; // Agar cache nahi hai, tabhi loader dikhao
-  });
-  
-  const [messages, setMessages] = useState(() => {
-    const cached = localStorage.getItem(`cv_msgs_${receiverId}`);
-    return cached ? JSON.parse(cached) : [];
-  });
-
-  // FIX 2: Background Cache Sync with Storage Quota Crash Protection
-  useEffect(() => {
-    if (messages.length > 0) {
-      try {
-        localStorage.setItem(`cv_msgs_${receiverId}`, JSON.stringify(messages.slice(-50)));
-      } catch (err) {
-        console.warn("Storage Quota Exceeded. Failed to cache messages.");
-      }
-    }
-  }, [messages, receiverId]);
+  const [messages, setMessages] = useState([]);
   const [showMenu, setShowMenu] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   
@@ -109,18 +87,6 @@ export default function ChatScreen() {
   const endOfMessagesRef = useRef(null);
   const typingTimeoutRef = useRef(null); 
   const isScrolledUpRef = useRef(false); 
-  
-  // FIX: Global mount tracker for Async operations (Prevents Memory Leaks)
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    return () => { isMountedRef.current = false; };
-  }, []); 
-  const scrollTimeoutRef = useRef(null); // FIX 4: Throttling ke liye naya Ref
-  
-  // FIX 2: Yeh track karega ki app khulte hi pehla instant scroll ho gaya ya nahi
-  const initialScrollDone = useRef(false); 
-  const textareaRef = useRef(null); // FIX 5: Textarea DOM manipulation ke liye naya Ref 
-  
   const [newMsgBadge, setNewMsgBadge] = useState(false); 
   const pressTimer = useRef(null);
   const longPressTriggered = useRef(false);
@@ -141,38 +107,26 @@ export default function ChatScreen() {
     setSocket(newSocket);
 
     // BUG 7 FIX: Connection Status tracking
-    newSocket.on('connect', () => {
-      if (isMounted) setIsConnected(true);
-      // FIX 1: Room Joining ko connect listener ke andar daala taaki har reconnect par ye trigger ho
-      newSocket.emit('join', currentUser.unique_id);
-      newSocket.emit('check_companion_status', { targetId: receiverId });
-    });
+    newSocket.on('connect', () => isMounted && setIsConnected(true));
     newSocket.on('disconnect', () => isMounted && setIsConnected(false));
 
-    // FIX 1: API aur Socket Race Condition Resolved. 
+    newSocket.emit('join', currentUser.unique_id);
+    newSocket.emit('check_companion_status', { targetId: receiverId });
+
+    // BUG 6 FIX: API Call Memory Leak Prevention
     api.get(`/messages/${receiverId}`).then(res => {
       if (!isMounted) return; 
       
       const fetchedMessages = res.data;
       const unreads = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
       if (unreads.length > 0) {
-        const totalUnread = res.headers && res.headers['x-total-unread'] ? parseInt(res.headers['x-total-unread']) : unreads.length;
-        const displayCount = (unreads.length === 50 && totalUnread >= 50) ? '50+' : totalUnread;
-        setInitialUnread({ count: displayCount, firstId: unreads[0].id });
+        setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
       }
-      
-      // FIX 2: Sirf API data nahi, balki jo naye message load hote waqt aaye unhe bhi bachao
-      setMessages(currentMsgs => {
-        const existingIds = new Set(fetchedMessages.map(m => m.id));
-        const newSocketMsgs = currentMsgs.filter(m => !existingIds.has(m.id) && !existingIds.has(m.tempId));
-        return [...fetchedMessages, ...newSocketMsgs];
-      });
-      
-      // FIX 3: API ka data aate hi loader band karo
-      setIsLoading(false); 
+      setMessages(fetchedMessages);
 
-      // FIX 4: Yahan se setTimeout aur scrollIntoView ko poori tarah HATA DIYA GAYA HAI. 
-      // Ab API delay ki wajah se scroll nahi atkega.
+      setTimeout(() => {
+        endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 100);
 
       if (!hideReadReceiptsRef.current && unreads.length > 0) {
         setMessages(prev => prev.map(m => 
@@ -216,13 +170,8 @@ export default function ChatScreen() {
             try {
               const toneId = localStorage.getItem(`cv_sound_${receiverId}`) || localStorage.getItem('chatverse_default_tone') || 'ringtone1';
               const audio = new Audio(`/sounds/${toneId}.mp3`);
-              audio.volume = 0.5; 
-              // FIX 2: Handle Audio Promise properly to prevent browser console crashes
-              const playPromise = audio.play();
-              if (playPromise !== undefined) {
-                playPromise.catch(error => console.warn("Audio autoplay blocked by browser policy"));
-              }
-            } catch (e) { console.warn("Audio error:", e); }
+              audio.volume = 0.5; audio.play();
+            } catch (e) {}
           }
           // STRICT SCROLL CHECK
           if (isScrolledUpRef.current) {
@@ -270,31 +219,15 @@ export default function ChatScreen() {
     return () => {
       isMounted = false; 
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      // FIX 3: Clear emit typing timeout to prevent memory leak
-      if (emitTypingTimeoutRef.current) clearTimeout(emitTypingTimeoutRef.current);
       newSocket.disconnect(); // Proper Teardown
     };
   }, [receiverId, currentUser.unique_id]); // DEPENDENCY ARRAY SE `hideReadReceipts` HATA DIYA TO STOP MULTIPLE SOCKETS
-
-  // ==============================================================
-  // INSTA-SCROLL LOGIC (0ms Delay)
-  // ==============================================================
-  useLayoutEffect(() => {
-    // Agar initial scroll nahi hua hai aur screen par messages aa gaye hain
-    if (!initialScrollDone.current && messages.length > 0) {
-      // behavior 'auto' rakha hai taaki smooth animation na ho, seedha teleport ho
-      endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
-      initialScrollDone.current = true; // Mark done taaki dubara na chale
-    }
-  }, [messages]);
     
   // BUG 12 FIX: Safe UTC Timezone Parsing
   const parseSafeUTC = (dateString) => {
     if (!dateString) return new Date();
     let safeString = dateString.includes('T') ? dateString : dateString.replace(' ', 'T');
-    // FIX: Safe regex check to see if string already contains valid timezone (+/-00:00 or Z)
-    const hasTimezone = /(Z|[+-]\d{2}:\d{2})$/.test(safeString);
-    return new Date(hasTimezone ? safeString : `${safeString}Z`);
+    return new Date(safeString.endsWith('Z') ? safeString : `${safeString}Z`);
   };
 
   const formatTime = (dateString) => {
@@ -320,27 +253,21 @@ export default function ChatScreen() {
 
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // FIX 4: Throttled Scroll logic to save Battery and CPU
   const handleScroll = useCallback((e) => {
-    if (scrollTimeoutRef.current) return; // Agar pehle se process ho raha hai, toh ignore karo
-
     const { scrollTop, clientHeight, scrollHeight } = e.target;
+    const isUp = scrollHeight - scrollTop - clientHeight > 100;
     
-    scrollTimeoutRef.current = setTimeout(() => {
-      const isUp = scrollHeight - scrollTop - clientHeight > 100;
-      isScrolledUpRef.current = isUp;
-      
-      setShowScrollButton(prev => {
-        if (prev !== isUp) return isUp;
-        return prev;
-      });
-      
-      if (!isUp && newMsgBadge) {
-        setNewMsgBadge(false);
-      }
-      scrollTimeoutRef.current = null; // Timer release karo agle frame ke liye
-    }, 100); // Har 100ms mein sirf ek baar chalega
-  }, [newMsgBadge]);
+    isScrolledUpRef.current = isUp;
+    
+    setShowScrollButton(prev => {
+      if (prev !== isUp) return isUp;
+      return prev;
+    });
+    
+    if (!isUp && newMsgBadge) {
+      setNewMsgBadge(false);
+    }
+  }, [newMsgBadge]); 
   
   const scrollToBottom = () => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -366,31 +293,23 @@ export default function ChatScreen() {
   // BUG 5 FIX: Debounced emit to save server RAM
   const handleTyping = useCallback((e) => {
     setMessage(e.target.value);
-    
-    // FIX 6: User interaction karte hi Stale Unread Badge hata do
-    if (initialUnread.count > 0) setInitialUnread({ count: 0, firstId: null });
-
-    // FIX 5: Direct DOM (`e.target`) ki jagah safely `textareaRef` use karo
+    const target = e.target;
     window.requestAnimationFrame(() => {
-      if (textareaRef.current) {
-         textareaRef.current.style.height = 'auto';
-         textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
-      }
+      target.style.height = 'auto';
+      target.style.height = `${target.scrollHeight}px`;
     });
 
     if (socket && !hasCustomPrivacy && !hideOnline) {
       if (emitTypingTimeoutRef.current) clearTimeout(emitTypingTimeoutRef.current);
       emitTypingTimeoutRef.current = setTimeout(() => {
         socket.emit('typing', { senderId: currentUser.unique_id, receiverId });
-      }, 500); 
+      }, 500); // Only 1 socket request per 500ms
     }
-  }, [socket, hasCustomPrivacy, hideOnline, currentUser.unique_id, receiverId, initialUnread.count]);
+  }, [socket, hasCustomPrivacy, hideOnline, currentUser.unique_id, receiverId]);
 
-  // FIX: Added useCallback to prevent memory bloat
-  const handleSend = useCallback(() => {
+  const handleSend = () => {
     if (message.trim() === '') return;
-    // FIX: Unique ID with Random suffix to prevent Duplicate Key DOM Crash
-    const tempId = Date.now().toString() + '-' + Math.random().toString(36).substring(2, 9);
+    const tempId = Date.now().toString();
     const newMsg = {
       tempId, id: tempId, sender_id: currentUser.unique_id, receiver_id: receiverId, content: message,
       status: 'sending', created_at: new Date().toISOString(), reaction: null, is_deleted_for_everyone: false, is_deleted_for_me: false,
@@ -401,12 +320,10 @@ export default function ChatScreen() {
     setMessage('');
     setShowEmojiPicker(false);
 
-    // FIX 6: Send karte hi Stale Unread Badge hata do
-    if (initialUnread.count > 0) setInitialUnread({ count: 0, firstId: null });
-
-    // FIX 5: Safely reset height via Ref
+    // FIX: Instant height reset without glitch
     window.requestAnimationFrame(() => {
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      const textarea = document.getElementById('chat-input');
+      if (textarea) textarea.style.height = 'auto';
     });
     
     const replyIdToSend = replyingTo ? replyingTo.id : null;
@@ -420,32 +337,33 @@ export default function ChatScreen() {
       endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
       isScrolledUpRef.current = false;
     }, 50);
-  }, [message, currentUser.unique_id, receiverId, replyingTo, socket, initialUnread.count]); // FIX: Missing closing bracket aur dependencies add kar di
+  };
 
-  const toggleSelection = useCallback((msg) => {
-    if (msg.is_deleted_for_everyone || msg.status === 'sending') return;
+  const toggleSelection = (msg) => {
+    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; // Added status check
     setSelectedMessages(prev => prev.some(m => m.id === msg.id) ? prev.filter(m => m.id !== msg.id) : [...prev, msg]);
-  }, []);
+  };
 
-  // FIX 3: Removed setSwipingId React state to stop massive re-renders. Pure DOM manipulation.
   const handlePointerDown = (e, msg) => {
-    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; 
+    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; // Added status check
     longPressTriggered.current = false;
-    // Added msgId to track exactly which message is being swiped natively
-    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId, msgId: msg.id };
+    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+    setSwipingId(msg.id);
+    setSwipeOffset(0);
 
     pressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
       if (selectedMessages.length === 0) {
         toggleSelection(msg);
+        setSwipingId(null); 
         if (window.navigator?.vibrate) window.navigator.vibrate(50); 
       }
     }, 450); 
   };
 
   const handlePointerMove = (e, msg) => {
-    if (selectedMessages.length > 0) return;
-    if (e.pointerId !== swipeStartRef.current.pointerId || swipeStartRef.current.msgId !== msg.id) return; 
+    if (swipingId !== msg.id || selectedMessages.length > 0) return;
+    if (e.pointerId !== swipeStartRef.current.pointerId) return; 
     
     const deltaX = e.clientX - swipeStartRef.current.x;
     const deltaY = Math.abs(e.clientY - swipeStartRef.current.y);
@@ -464,6 +382,7 @@ export default function ChatScreen() {
         replyIcon.style.opacity = 0;
         replyIcon.style.transform = `scale(0)`;
       }
+      setSwipingId(null); 
       return; 
     }
     
@@ -486,7 +405,7 @@ export default function ChatScreen() {
 
   const handlePointerUpOrLeave = (e, msg) => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
-    if (swipeStartRef.current.msgId === msg.id) {
+    if (swipingId === msg.id) {
       const deltaX = e.clientX - swipeStartRef.current.x;
       if (deltaX >= 45) { 
         setReplyingTo(msg);
@@ -506,7 +425,7 @@ export default function ChatScreen() {
         replyIcon.style.transform = `scale(0)`;
       }
       
-      swipeStartRef.current.msgId = null; // Clean up track ID
+      setSwipingId(null);
     }
   };
 
@@ -526,8 +445,7 @@ export default function ChatScreen() {
     setSelectedMessages([]);
   };
 
-  // FIX: Memory Leak prevention and useCallback optimization
-  const handleDeleteForMe = useCallback(async (messageId) => {
+  const handleDeleteForMe = async (messageId) => {
     const messageToRestore = messages.find(m => m.id === messageId);
     setMessages((prev) => prev.filter(msg => msg.id !== messageId));
     setSelectedMessages([]);
@@ -536,15 +454,12 @@ export default function ChatScreen() {
       await api.delete(`/messages/forme/${messageId}`);
     } catch (err) {
       console.error("Delete failed, reverting UI");
-      // FIX: Check if component is still mounted before updating state
-      if (isMountedRef.current) {
-        if (messageToRestore) {
-          setMessages((prev) => [...prev, { ...messageToRestore, failed_delete: true }].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
-        }
-        alert("Failed to delete message. Please try again.");
+      if (messageToRestore) {
+        setMessages((prev) => [...prev, messageToRestore].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
       }
+      alert("Failed to delete message. Please try again.");
     }
-  }, [messages]);
+  };
 
   const handleDeleteForEveryone = () => {
     const ids = selectedMessages.filter(m => m.sender_id === currentUser.unique_id).map(m => m.id);
@@ -676,14 +591,15 @@ export default function ChatScreen() {
 
             <div className="relative max-w-[80%] flex flex-col">
               
-              {/* FIX 4: Reply Icon is always in DOM but hidden via CSS. Prevents React re-renders. */}
-              <div id={`reply-icon-${msg.id}`} className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
-                   style={{ left: '-6px', opacity: 0, transform: 'scale(0)' }}>
-                <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
-              </div>
+              {swipingId === msg.id && (
+                <div id={`reply-icon-${msg.id}`} className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
+                     style={{ left: '-6px', opacity: 0, transform: 'scale(0)' }}>
+                  <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
+                </div>
+              )}
 
               <div id={`swipe-wrap-${msg.id}`} className="relative flex flex-col z-20"
-                   style={{ transform: 'translate3d(0px, 0, 0)', transition: 'transform 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
+                   style={{ transform: 'translate3d(0px, 0, 0)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
                 
                 <div 
                   onClick={(e) => { 
@@ -714,12 +630,6 @@ export default function ChatScreen() {
                   
                   <div className="relative text-[15.5px] leading-[1.4] break-words">
                     <span>{msg.content}</span>
-                    
-                    {/* FIX 7: Failed Delete Indicator UI */}
-                    {msg.failed_delete && (
-                       <span className="block text-[11px] text-red-300 font-bold mt-1">⚠️ Failed to delete</span>
-                    )}
-                    
                     {!msg.is_deleted_for_everyone && (
                       <span className={`inline-block h-[14px] ${isMe ? 'w-[85px]' : 'w-[60px]'}`}></span>
                     )}
@@ -799,7 +709,7 @@ export default function ChatScreen() {
         </div>
       );
     });
-  }, [messages, activeReactId, selectedMessages, chatTheme, currentUser.unique_id, receiverId, initialUnread]);
+  }, [messages, activeReactId, swipingId, selectedMessages, chatTheme, currentUser.unique_id, receiverId, initialUnread]);
 
   return (
     <div 
@@ -825,12 +735,7 @@ export default function ChatScreen() {
               setSelectedMessages([]);
             }} className="p-2 hover:bg-white/20 rounded-full"><Star className="w-5 h-5" /></button>
             
-            <button onClick={() => { 
-  // FIX: Unhandled Promise Rejection handle kiya gaya
-  navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n'))
-    .catch(err => console.warn("Clipboard access denied", err)); 
-  setSelectedMessages([]); 
-}} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
+            <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
             
             <button onClick={async () => {
               const idsToDelete = selectedMessages.map(m => m.id);
@@ -928,18 +833,7 @@ export default function ChatScreen() {
         className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
       >
-        {/* FIX 4: Skeleton Loader UI for instant feedback (No more blank screen) */}
-        {isLoading ? (
-          <div className="flex flex-col gap-5 w-full pt-2 opacity-60 animate-pulse pointer-events-none">
-             <div className="flex w-full justify-start"><div className="w-[65%] h-[55px] bg-gray-200 dark:bg-gray-700 rounded-2xl rounded-tl-[4px]"></div></div>
-             <div className="flex w-full justify-end"><div className="w-[50%] h-[55px] bg-indigo-100 dark:bg-indigo-900/40 rounded-2xl rounded-tr-[4px]"></div></div>
-             <div className="flex w-full justify-end"><div className="w-[75%] h-[75px] bg-indigo-100 dark:bg-indigo-900/40 rounded-2xl rounded-tr-[4px]"></div></div>
-             <div className="flex w-full justify-start"><div className="w-[45%] h-[55px] bg-gray-200 dark:bg-gray-700 rounded-2xl rounded-tl-[4px]"></div></div>
-             <div className="flex w-full justify-start"><div className="w-[55%] h-[55px] bg-gray-200 dark:bg-gray-700 rounded-2xl rounded-tl-[4px]"></div></div>
-          </div>
-        ) : (
-          renderedMessagesList
-        )}
+        {renderedMessagesList}
 
         {isTyping && (
           <div className="self-start max-w-[75%] mt-2 mb-2">

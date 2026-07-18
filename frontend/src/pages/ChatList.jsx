@@ -304,8 +304,7 @@ export default function ChatList() {
         ) : searchQuery.length > 0 ? (
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 overflow-hidden mt-2">
              <div className="px-5 py-3 text-[11px] font-black text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Search Results</div>
-             {useMemo(() => (
-               searchResults.length > 0 ? searchResults.map((user) => (
+             {searchResults.length > 0 ? searchResults.map((user) => (
                 <div key={user.unique_id} onClick={() => navigate(`/user/${user.unique_id}`, { state: { user } })} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-50 dark:border-gray-700 transition-colors">
                   <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg uppercase shadow-sm">{user.username.charAt(0)}</div>
                   <div className="flex-1">
@@ -320,13 +319,11 @@ export default function ChatList() {
                   </div>
                   <ChevronRight className="text-gray-300 dark:text-gray-500 w-5 h-5" />
                 </div>
-              )) : <div className="text-center py-8 text-gray-400 dark:text-gray-500 font-medium text-[14px]">No users found.</div>
-             ), [searchResults])}
+              )) : <div className="text-center py-8 text-gray-400 dark:text-gray-500 font-medium text-[14px]">No users found.</div>}
           </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 mx-4 rounded-[24px] shadow-sm border border-gray-50 dark:border-gray-700 mt-2 overflow-hidden">
-            {useMemo(() => (
-              processedChats.length > 0 ? processedChats.map((user) => {
+            {processedChats.length > 0 ? processedChats.map((user) => {
                 const hasStar = localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true';
                 const isUnread = Number(user.unread_count) > 0;
                 
@@ -343,7 +340,6 @@ export default function ChatList() {
                 return (
                   <div 
                     key={user.unique_id} 
-                    // FIX: Capture pointer and remove onPointerLeave
                     onPointerDown={(e) => { e.currentTarget.setPointerCapture?.(e.pointerId); handlePointerDown(e, user); }}
                     onPointerMove={handlePointerMove}
                     onPointerUp={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(); }}
@@ -404,8 +400,7 @@ export default function ChatList() {
                   <h3 className="text-gray-700 dark:text-gray-300 font-bold text-[16px] mb-1">No chats yet</h3>
                   <p className="text-[13px] text-gray-500 font-medium">Search for friends to start.</p>
                 </div>
-              )
-            ), [processedChats, typingUsers, longPressedChat, currentUser.unique_id])}
+              )}
           </div>
         )}
       </div>
