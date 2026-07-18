@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+// FIX 1: useLayoutEffect import kiya gaya (Insta-scroll ke liye)
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { ArrowLeft, MoreVertical, Send, Smile, Check, CheckCheck, Clock, Trash2, X, Reply, Star, Copy, BellOff, Palette, Music, Heart } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -45,7 +46,25 @@ export default function ChatScreen() {
   const [showSoundModal, setShowSoundModal] = useState(false);
   const [previewChatTone, setPreviewChatTone] = useState('');
   const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState([]);
+  
+  // FIX 1: Local Cache aur Loading State add kiya
+  const [isLoading, setIsLoading] = useState(() => {
+    const cached = localStorage.getItem(`cv_msgs_${receiverId}`);
+    return !cached; // Agar cache nahi hai, tabhi loader dikhao
+  });
+  
+  const [messages, setMessages] = useState(() => {
+    const cached = localStorage.getItem(`cv_msgs_${receiverId}`);
+    return cached ? JSON.parse(cached) : [];
+  });
+
+  // FIX 2: Background Cache Sync (Har naye message par cache update hoga)
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Memory bachane ke liye sirf last 50 messages cache karenge
+      localStorage.setItem(`cv_msgs_${receiverId}`, JSON.stringify(messages.slice(-50)));
+    }
+  }, [messages, receiverId]);
   const [showMenu, setShowMenu] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   
@@ -87,6 +106,10 @@ export default function ChatScreen() {
   const endOfMessagesRef = useRef(null);
   const typingTimeoutRef = useRef(null); 
   const isScrolledUpRef = useRef(false); 
+  
+  // FIX 2: Yeh track karega ki app khulte hi pehla instant scroll ho gaya ya nahi
+  const initialScrollDone = useRef(false); 
+  
   const [newMsgBadge, setNewMsgBadge] = useState(false); 
   const pressTimer = useRef(null);
   const longPressTriggered = useRef(false);
@@ -129,10 +152,12 @@ export default function ChatScreen() {
         const newSocketMsgs = currentMsgs.filter(m => !existingIds.has(m.id) && !existingIds.has(m.tempId));
         return [...fetchedMessages, ...newSocketMsgs];
       });
+      
+      // FIX 3: API ka data aate hi loader band karo
+      setIsLoading(false); 
 
-      setTimeout(() => {
-        endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
-      }, 100);
+      // FIX 4: Yahan se setTimeout aur scrollIntoView ko poori tarah HATA DIYA GAYA HAI. 
+      // Ab API delay ki wajah se scroll nahi atkega.
 
       if (!hideReadReceiptsRef.current && unreads.length > 0) {
         setMessages(prev => prev.map(m => 
@@ -228,6 +253,18 @@ export default function ChatScreen() {
       newSocket.disconnect(); // Proper Teardown
     };
   }, [receiverId, currentUser.unique_id]); // DEPENDENCY ARRAY SE `hideReadReceipts` HATA DIYA TO STOP MULTIPLE SOCKETS
+
+  // ==============================================================
+  // INSTA-SCROLL LOGIC (0ms Delay)
+  // ==============================================================
+  useLayoutEffect(() => {
+    // Agar initial scroll nahi hua hai aur screen par messages aa gaye hain
+    if (!initialScrollDone.current && messages.length > 0) {
+      // behavior 'auto' rakha hai taaki smooth animation na ho, seedha teleport ho
+      endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
+      initialScrollDone.current = true; // Mark done taaki dubara na chale
+    }
+  }, [messages]);
     
   // BUG 12 FIX: Safe UTC Timezone Parsing
   const parseSafeUTC = (dateString) => {
@@ -836,7 +873,18 @@ export default function ChatScreen() {
         className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
       >
-        {renderedMessagesList}
+        {/* FIX 4: Skeleton Loader UI for instant feedback (No more blank screen) */}
+        {isLoading ? (
+          <div className="flex flex-col gap-5 w-full pt-2 opacity-60 animate-pulse pointer-events-none">
+             <div className="flex w-full justify-start"><div className="w-[65%] h-[55px] bg-gray-200 dark:bg-gray-700 rounded-2xl rounded-tl-[4px]"></div></div>
+             <div className="flex w-full justify-end"><div className="w-[50%] h-[55px] bg-indigo-100 dark:bg-indigo-900/40 rounded-2xl rounded-tr-[4px]"></div></div>
+             <div className="flex w-full justify-end"><div className="w-[75%] h-[75px] bg-indigo-100 dark:bg-indigo-900/40 rounded-2xl rounded-tr-[4px]"></div></div>
+             <div className="flex w-full justify-start"><div className="w-[45%] h-[55px] bg-gray-200 dark:bg-gray-700 rounded-2xl rounded-tl-[4px]"></div></div>
+             <div className="flex w-full justify-start"><div className="w-[55%] h-[55px] bg-gray-200 dark:bg-gray-700 rounded-2xl rounded-tl-[4px]"></div></div>
+          </div>
+        ) : (
+          renderedMessagesList
+        )}
 
         {isTyping && (
           <div className="self-start max-w-[75%] mt-2 mb-2">
