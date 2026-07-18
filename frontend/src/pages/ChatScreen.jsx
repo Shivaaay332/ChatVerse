@@ -113,7 +113,7 @@ export default function ChatScreen() {
     newSocket.emit('join', currentUser.unique_id);
     newSocket.emit('check_companion_status', { targetId: receiverId });
 
-    // BUG 6 FIX: API Call Memory Leak Prevention
+    // FIX 1: API aur Socket Race Condition Resolved. 
     api.get(`/messages/${receiverId}`).then(res => {
       if (!isMounted) return; 
       
@@ -122,7 +122,13 @@ export default function ChatScreen() {
       if (unreads.length > 0) {
         setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
       }
-      setMessages(fetchedMessages);
+      
+      // FIX 2: Sirf API data nahi, balki jo naye message load hote waqt aaye unhe bhi bachao
+      setMessages(currentMsgs => {
+        const existingIds = new Set(fetchedMessages.map(m => m.id));
+        const newSocketMsgs = currentMsgs.filter(m => !existingIds.has(m.id) && !existingIds.has(m.tempId));
+        return [...fetchedMessages, ...newSocketMsgs];
+      });
 
       setTimeout(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -344,26 +350,25 @@ export default function ChatScreen() {
     setSelectedMessages(prev => prev.some(m => m.id === msg.id) ? prev.filter(m => m.id !== msg.id) : [...prev, msg]);
   };
 
+  // FIX 3: Removed setSwipingId React state to stop massive re-renders. Pure DOM manipulation.
   const handlePointerDown = (e, msg) => {
-    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; // Added status check
+    if (msg.is_deleted_for_everyone || msg.status === 'sending') return; 
     longPressTriggered.current = false;
-    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
-    setSwipingId(msg.id);
-    setSwipeOffset(0);
+    // Added msgId to track exactly which message is being swiped natively
+    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId, msgId: msg.id };
 
     pressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
       if (selectedMessages.length === 0) {
         toggleSelection(msg);
-        setSwipingId(null); 
         if (window.navigator?.vibrate) window.navigator.vibrate(50); 
       }
     }, 450); 
   };
 
   const handlePointerMove = (e, msg) => {
-    if (swipingId !== msg.id || selectedMessages.length > 0) return;
-    if (e.pointerId !== swipeStartRef.current.pointerId) return; 
+    if (selectedMessages.length > 0) return;
+    if (e.pointerId !== swipeStartRef.current.pointerId || swipeStartRef.current.msgId !== msg.id) return; 
     
     const deltaX = e.clientX - swipeStartRef.current.x;
     const deltaY = Math.abs(e.clientY - swipeStartRef.current.y);
@@ -382,7 +387,6 @@ export default function ChatScreen() {
         replyIcon.style.opacity = 0;
         replyIcon.style.transform = `scale(0)`;
       }
-      setSwipingId(null); 
       return; 
     }
     
@@ -405,7 +409,7 @@ export default function ChatScreen() {
 
   const handlePointerUpOrLeave = (e, msg) => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
-    if (swipingId === msg.id) {
+    if (swipeStartRef.current.msgId === msg.id) {
       const deltaX = e.clientX - swipeStartRef.current.x;
       if (deltaX >= 45) { 
         setReplyingTo(msg);
@@ -425,7 +429,7 @@ export default function ChatScreen() {
         replyIcon.style.transform = `scale(0)`;
       }
       
-      setSwipingId(null);
+      swipeStartRef.current.msgId = null; // Clean up track ID
     }
   };
 
@@ -591,15 +595,14 @@ export default function ChatScreen() {
 
             <div className="relative max-w-[80%] flex flex-col">
               
-              {swipingId === msg.id && (
-                <div id={`reply-icon-${msg.id}`} className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
-                     style={{ left: '-6px', opacity: 0, transform: 'scale(0)' }}>
-                  <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
-                </div>
-              )}
+              {/* FIX 4: Reply Icon is always in DOM but hidden via CSS. Prevents React re-renders. */}
+              <div id={`reply-icon-${msg.id}`} className="absolute top-1/2 -translate-y-1/2 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-full w-[28px] h-[28px] z-10"
+                   style={{ left: '-6px', opacity: 0, transform: 'scale(0)' }}>
+                <Reply className="w-[14px] h-[14px] text-gray-700 dark:text-gray-200" />
+              </div>
 
               <div id={`swipe-wrap-${msg.id}`} className="relative flex flex-col z-20"
-                   style={{ transform: 'translate3d(0px, 0, 0)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
+                   style={{ transform: 'translate3d(0px, 0, 0)', transition: 'transform 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
                 
                 <div 
                   onClick={(e) => { 
@@ -709,7 +712,7 @@ export default function ChatScreen() {
         </div>
       );
     });
-  }, [messages, activeReactId, swipingId, selectedMessages, chatTheme, currentUser.unique_id, receiverId, initialUnread]);
+  }, [messages, activeReactId, selectedMessages, chatTheme, currentUser.unique_id, receiverId, initialUnread]);
 
   return (
     <div 

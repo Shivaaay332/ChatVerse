@@ -96,15 +96,16 @@ export default function Settings() {
     document.documentElement.style.fontSize = sizes[val];
   };
 
+  // NEW FIX: Require PIN to disable App Lock
   const handleAppLock = () => {
     if (!appLock) {
       setStep(1); setPin(''); setConfirmPin(''); setPinError(false); setShowPinModal(true);
     } else {
-      localStorage.removeItem('chatverse_applock'); localStorage.removeItem('chatverse_pin'); setAppLock(false);
+      setStep(3); setPin(''); setPinError(false); setShowPinModal(true); // Ask for current PIN
     }
   };
 
-  // FIX: Action Lock (API Spam Prevention) & Optimistic Rollback
+  // NEW FIX: Strictly Sync LocalStorage with Fallback
   const handleLastSeen = async () => {
     if (isUpdatingPrivacy) return;
     const previousValue = hideLastSeen;
@@ -112,12 +113,15 @@ export default function Settings() {
     
     setIsUpdatingPrivacy(true);
     setHideLastSeen(newValue);
+    localStorage.setItem('chatverse_hide_lastseen', newValue); // Set Optimistic
     
     try { 
       await api.put('/users/me/privacy', { hideLastSeen: newValue }); 
-      localStorage.setItem('chatverse_hide_lastseen', newValue);
     } catch(err) { 
-      if (isMountedRef.current) setHideLastSeen(previousValue); // Rollback on error
+      if (isMountedRef.current) {
+        setHideLastSeen(previousValue); 
+        localStorage.setItem('chatverse_hide_lastseen', previousValue); // Rollback LS on error
+      }
       alert("Failed to update setting. Please try again.");
     } finally {
       if (isMountedRef.current) setIsUpdatingPrivacy(false);
@@ -131,12 +135,15 @@ export default function Settings() {
     
     setIsUpdatingPrivacy(true);
     setHideOnline(newValue);
+    localStorage.setItem('chatverse_hide_online', newValue);
     
     try { 
       await api.put('/users/me/privacy', { hideOnlineStatus: newValue }); 
-      localStorage.setItem('chatverse_hide_online', newValue);
     } catch(err) { 
-      if (isMountedRef.current) setHideOnline(previousValue); 
+      if (isMountedRef.current) {
+        setHideOnline(previousValue); 
+        localStorage.setItem('chatverse_hide_online', previousValue);
+      }
       alert("Failed to update setting. Please try again.");
     } finally {
       if (isMountedRef.current) setIsUpdatingPrivacy(false);
@@ -150,17 +157,21 @@ export default function Settings() {
     
     setIsUpdatingPrivacy(true);
     setHideReadReceipts(newValue);
+    localStorage.setItem('chatverse_hide_readreceipts', newValue);
     
     try { 
       await api.put('/users/me/privacy', { hideReadReceipts: newValue }); 
-      localStorage.setItem('chatverse_hide_readreceipts', newValue);
     } catch(err) { 
-      if (isMountedRef.current) setHideReadReceipts(previousValue); 
+      if (isMountedRef.current) {
+        setHideReadReceipts(previousValue); 
+        localStorage.setItem('chatverse_hide_readreceipts', previousValue);
+      }
       alert("Failed to update setting. Please try again.");
     } finally {
       if (isMountedRef.current) setIsUpdatingPrivacy(false);
     }
   };
+
 
   const handleGetVerified = async () => {
     if (currentUser.is_verified) { alert("You are already verified! ✅"); return; }
@@ -173,12 +184,20 @@ export default function Settings() {
     } catch (err) { alert("Failed to get verified. Please try again."); }
   };
 
+  // NEW FIX: Await Unsubscription and Unregister Service Workers to stop Ghost Notifications
   const handleLogout = async () => {
-    try { await api.post('/notifications/unsubscribe').catch(() => {}); } catch(e) {}
+    try { 
+      await api.post('/notifications/unsubscribe'); 
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (let reg of regs) { await reg.unregister(); }
+      }
+    } catch(e) { console.error("Logout cleanup error:", e); }
+    
     window.dispatchEvent(new Event('chatverse_logout_trigger'));
     localStorage.clear();
     document.documentElement.style.fontSize = '16px'; 
-    window.location.href = '/'; // Hard reload to kill all active websockets
+    window.location.href = '/'; // Safe hard reload
   };
 
   const handleKeyPress = (num) => {
@@ -196,8 +215,25 @@ export default function Settings() {
           localStorage.setItem('chatverse_pin', pin);
           localStorage.setItem('chatverse_applock', 'true');
           setAppLock(true);
-          // FIX: Lock Bypass Vulnerability - Instantly enforce app lock globally
           window.dispatchEvent(new Event('chatverse_applock_triggered'));
+          setTimeout(() => { if(isMountedRef.current) setShowPinModal(false); }, 300);
+        } else {
+          setPinError(true);
+          setTimeout(() => { 
+            if(isMountedRef.current) {
+               setPin(''); 
+               setStep(1); // FIX: Reset to Step 1 to break the infinite loop
+               setConfirmPin('');
+            }
+          }, 500);
+        }
+      } else if (step === 3) {
+        // FIX: Verify Current PIN before Disabling Lock
+        const currentPin = localStorage.getItem('chatverse_pin');
+        if (pin === currentPin) {
+          localStorage.removeItem('chatverse_applock');
+          localStorage.removeItem('chatverse_pin');
+          setAppLock(false);
           setTimeout(() => { if(isMountedRef.current) setShowPinModal(false); }, 300);
         } else {
           setPinError(true);
@@ -479,9 +515,17 @@ export default function Settings() {
                 return (
                   <button 
                     key={toneId} 
+                    // NEW FIX: Safely wrap Audio Play to prevent DOM Exceptions crashing React
                     onClick={() => {
                       setPreviewTone(toneId); 
-                      new Audio(`/sounds/${toneId}.mp3`).play().catch(()=>{}); 
+                      try {
+                        const audio = new Audio(`/sounds/${toneId}.mp3`);
+                        audio.volume = 0.5;
+                        const playPromise = audio.play();
+                        if (playPromise !== undefined) {
+                          playPromise.catch(error => console.warn("Tone preview blocked by browser policy"));
+                        }
+                      } catch (e) { console.warn("Audio exception:", e); }
                     }}
                     className={`flex items-center justify-between p-3.5 rounded-2xl transition-all ${previewTone === toneId ? 'bg-indigo-50 border border-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800' : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                   >
