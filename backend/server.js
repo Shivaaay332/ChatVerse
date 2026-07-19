@@ -106,7 +106,10 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const user = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $1', [req.body.unique_id]);
+    // ✅ NAYA CHANGE: Frontend se email aaye ya unique_id, dono ko accurately catch karega
+    const loginIdentifier = req.body.email || req.body.unique_id;
+    const user = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $1', [loginIdentifier]);
+    
     if (user.rows.length === 0) return res.status(400).json({ error: 'User not found!' });
     if (!await bcrypt.compare(req.body.password, user.rows[0].password_hash)) return res.status(400).json({ error: 'Incorrect password!' });
     const token = jwt.sign({ id: user.rows[0].unique_id }, ACTIVE_JWT_SECRET, { expiresIn: '7d' });
@@ -116,7 +119,22 @@ app.post('/api/auth/login', async (req, res) => {
 
 // --- USER APIs ---
 app.get('/api/users/search', authenticateToken, async (req, res) => {
-  try { res.status(200).json((await db.query(`SELECT unique_id, username, bio, is_verified FROM users WHERE unique_id ILIKE $1 AND unique_id != $2 AND unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $2) AND unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $2) LIMIT 10`, [`%${req.query.query}%`, req.user.id])).rows); } catch (err) { res.status(500).json({ error: 'Error searching' }); }
+  try { 
+    // ✅ NAYA CHANGE: Ab unique_id ke sath-sath username (Full Name) column mein bhi search karega
+    const searchQuery = `
+      SELECT unique_id, username, bio, is_verified 
+      FROM users 
+      WHERE (unique_id ILIKE $1 OR username ILIKE $1) 
+      AND unique_id != $2 
+      AND unique_id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $2) 
+      AND unique_id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $2) 
+      LIMIT 15
+    `;
+    const result = await db.query(searchQuery, [`%${req.query.query}%`, req.user.id]);
+    res.status(200).json(result.rows); 
+  } catch (err) { 
+    res.status(500).json({ error: 'Error searching' }); 
+  }
 });
 
 app.get('/api/users/me/stats', authenticateToken, async (req, res) => {
