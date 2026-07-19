@@ -350,9 +350,13 @@ export const PostItem = memo(({ post, onPostUpdate, onPostDelete, isModal = fals
               : likedUsers.length === 0 ? <div className="py-8 text-center text-[14px] font-medium text-gray-500">No likes yet.</div> 
               : likedUsers.map(u => (
                 <div key={u.unique_id} onClick={() => handleProfileClick(u.unique_id, u.username)} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-2xl cursor-pointer transition-colors">
-                  <div className="text-[14px] bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold uppercase shadow-sm shrink-0">{u.username.charAt(0)}</div>
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-900 dark:text-white text-[15px] flex items-center gap-1">
+                  {/* ✅ FIX: w-10 h-10, min-w-[40px] aur aspect-square add kiya taaki kabhi pichke nahi */}
+                  <div className="w-10 h-10 min-w-[40px] aspect-square bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-[15px] uppercase shadow-sm shrink-0">
+                    {u.username.charAt(0)}
+                  </div>
+                  {/* ✅ FIX: min-w-0 lagaya taaki lamba text avatar ko dhakka na maare */}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-gray-900 dark:text-white text-[15px] flex items-center gap-1 truncate">
                       {u.username}
                       {u.is_verified && <BadgeCheck className="w-[14px] h-[14px] text-[#1d9bf0]" />}
                     </p>

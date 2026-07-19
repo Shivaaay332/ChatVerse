@@ -23,18 +23,26 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
   // FIX: Socket reconnect rokne ke liye isMuted ko ref me store kiya
   const isMutedRef = useRef(isMuted);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  // ✅ FIX 1: Smooth Viewport Resize (Delay added to prevent bottom white screen)
   useEffect(() => {
+    let resizeTimer;
     const handleResize = () => {
-      if (window.visualViewport) {
-        setViewportHeight(`${window.visualViewport.height}px`);
-      } else {
-        setViewportHeight(`${window.innerHeight}px`);
-      }
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (window.visualViewport) {
+          setViewportHeight(`${window.visualViewport.height}px`);
+          window.scrollTo(0, 0); // Force browser to recalculate bounds
+        } else {
+          setViewportHeight(`${window.innerHeight}px`);
+        }
+      }, 150); // 150ms delay lets keyboard fully close first
     };
+    
     window.visualViewport?.addEventListener('resize', handleResize);
     window.addEventListener('resize', handleResize);
     handleResize(); 
     return () => {
+      clearTimeout(resizeTimer);
       window.visualViewport?.removeEventListener('resize', handleResize);
       window.removeEventListener('resize', handleResize);
     };
@@ -44,8 +52,27 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showSoundModal, setShowSoundModal] = useState(false);
   const [previewChatTone, setPreviewChatTone] = useState('');
-  const [message, setMessage] = useState('');
+  
+  // 💎 PREMIUM: Draft Saving Logic (Message likhte hue back gaye toh save rahega)
+  const [message, setMessage] = useState(() => localStorage.getItem(`cv_draft_${receiverId}`) || '');
   const [messages, setMessages] = useState([]);
+  
+  // 💎 PREMIUM: Edit, Pin, aur Search ke States
+  const [editingMsg, setEditingMsg] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Draft auto-save effect
+  useEffect(() => {
+    if (message.trim() && !editingMsg) localStorage.setItem(`cv_draft_${receiverId}`, message);
+    else localStorage.removeItem(`cv_draft_${receiverId}`);
+  }, [message, receiverId, editingMsg]);
+
+  // ✅ FIX: Chat switch hone par naye user ka draft load karna aur Edit mode hatana
+  useEffect(() => {
+    setMessage(localStorage.getItem(`cv_draft_${receiverId}`) || '');
+    setEditingMsg(null);
+  }, [receiverId]);
   const [showMenu, setShowMenu] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   
@@ -184,7 +211,7 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
     const handleTyping = (senderId) => {
       if (senderId === receiverId) {
         setIsTyping(true); setIsOnline(true); setLastSeenTime(new Date().toISOString()); 
-        if (!isScrolledUpRef.current) setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        // ✅ FIX 2: Removed scrollIntoView! Ab opponent ke type karne par screen forcefully upar nahi bhagegi.
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 2000);
       }
@@ -311,6 +338,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   const handleSend = () => {
     if (message.trim() === '') return;
+
+    // ✅ FIX: Edit Mode logic deleted, direct normal flow
     const tempId = Date.now().toString();
     const newMsg = {
       tempId, id: tempId, sender_id: currentUser.unique_id, receiver_id: receiverId, content: message,
@@ -320,9 +349,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
     setMessages((prev) => [...prev, newMsg]);
     setMessage('');
+    localStorage.removeItem(`cv_draft_${receiverId}`); // Clear draft after send
     setShowEmojiPicker(false);
 
-    // FIX: Instant height reset without glitch
+    // ✅ FIX 3: Textarea Bounce Fix (Repaint aur Scroll alag kiya)
     window.requestAnimationFrame(() => {
       const textarea = document.getElementById('chat-input');
       if (textarea) textarea.style.height = 'auto';
@@ -336,9 +366,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
     }
 
     setTimeout(() => {
-      endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // ✅ FIX 3: Behavior 'auto' removes the bounce conflict with textarea shrink
+      endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' }); 
       isScrolledUpRef.current = false;
-    }, 50);
+    }, 80); // Thoda zyada delay taaki DOM settle ho jaye
   };
 
   const toggleSelection = (msg) => {
@@ -526,18 +557,24 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   // FIX: Typing lag dur karne ke liye saare messages map ko memoize kar diya
   const renderedMessagesList = useMemo(() => {
-    return messages.map((msg, index) => {
+    // ✅ FIX (Bug 4): Deleted messages ko search filter se bahar nikal diya gaya hai
+    const filteredMessages = searchQuery.trim() 
+      ? messages.filter(m => !m.is_deleted_for_everyone && m.content?.toLowerCase().includes(searchQuery.toLowerCase()))
+      : messages;
+
+    return filteredMessages.map((msg, index, arr) => {
 
       const isMe = msg.sender_id === currentUser.unique_id;
       const hasReaction = !!msg.reaction;
       const isSelected = selectedMessages.some(m => m.id === msg.id);
       
       const msgDate = new Date(msg.created_at || Date.now());
-      const prevMsgDate = index > 0 ? new Date(messages[index - 1].created_at || Date.now()) : null;
+      // ✅ FIX: Array index ko `arr` se map karna taaki search filter hone par crash na ho
+      const prevMsgDate = index > 0 ? new Date(arr[index - 1].created_at || Date.now()) : null;
       const showDateSeparator = !prevMsgDate || msgDate.toDateString() !== prevMsgDate.toDateString();
 
-      const isPrevSameSender = !showDateSeparator && index > 0 && messages[index - 1].sender_id === msg.sender_id;
-      const isNextSameSender = index < messages.length - 1 && messages[index + 1].sender_id === msg.sender_id && new Date(messages[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
+      const isPrevSameSender = !showDateSeparator && index > 0 && arr[index - 1].sender_id === msg.sender_id;
+      const isNextSameSender = index < arr.length - 1 && arr[index + 1].sender_id === msg.sender_id && new Date(arr[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
 
       let radiusClasses = 'rounded-2xl';
       if (isMe) {
@@ -613,11 +650,12 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
                   onPointerMove={(e) => { e.stopPropagation(); handlePointerMove(e, msg); }}
                   onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture?.(e.pointerId); handlePointerUpOrLeave(e, msg); }}
                   onPointerCancel={(e) => { e.stopPropagation(); handlePointerUpOrLeave(e, msg); }}
-                  className={`message-bubble relative px-3 pt-2 pb-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer transition-all select-none ${
+                  /* 💎 Premium Floating Bubbles & Hover Effects 💎 */
+                  className={`message-bubble relative px-3 pt-2 pb-1.5 cursor-pointer select-none animate-float hover:-translate-y-0.5 hover:shadow-lg transition-all duration-300 ${
                     isSelected ? `bg-indigo-100 dark:bg-indigo-900 border-2 border-indigo-400 ${radiusClasses}` :
                     msg.is_deleted_for_everyone ? `bg-white/60 dark:bg-gray-800/60 text-gray-400 dark:text-gray-500 italic border border-gray-200 dark:border-gray-700 ${radiusClasses}` 
-                    : isMe ? `bg-chatverse text-white ${radiusClasses}` 
-                    : `bg-white dark:bg-gray-800 border border-gray-100/50 dark:border-gray-700/50 text-gray-800 dark:text-gray-100 ${radiusClasses}`
+                    : isMe ? `bg-chatverse text-white shadow-[0_4px_15px_rgba(99,102,241,0.2)] ${radiusClasses}` 
+                    : `bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border border-white/20 dark:border-white/5 text-gray-800 dark:text-gray-100 shadow-[0_2px_10px_rgba(0,0,0,0.05)] ${radiusClasses}`
                   }`}
                 >
                   
@@ -640,6 +678,7 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
                   {!msg.is_deleted_for_everyone && (
                     <div className={`absolute bottom-1 right-2 flex items-center gap-[3px] text-[10px] font-medium select-none ${isMe ? 'text-indigo-100/90' : 'text-gray-400 dark:text-gray-500'}`}>
                       {msg.is_starred && <Star className="w-[10px] h-[10px] fill-current mr-0.5" />}
+                      {/* ✅ FIX: Edited tag removed completely */}
                       <span className="leading-none">{formatTime(msg.created_at)}</span>
                       {isMe && (
                         <span className="flex items-center ml-0.5">
@@ -649,7 +688,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
                             <>
                               {msg.status === 'sent' && <Check className="w-[12px] h-[12px]" />}
                               {msg.status === 'delivered' && <CheckCheck className="w-[14px] h-[14px] text-indigo-200" />}
-                              {msg.status === 'read' && <CheckCheck className="w-[14px] h-[14px] text-[#4ADE80]" />}
+                              {/* 💎 Animated Pop for Read Receipts 💎 */}
+                              {msg.status === 'read' && <CheckCheck className="w-[14px] h-[14px] text-[#4ADE80] animate-tick" />}
                             </>
                           )}
 
@@ -711,24 +751,39 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
         </div>
       );
     });
-  }, [messages, activeReactId, swipingId, selectedMessages, chatTheme, currentUser.unique_id, receiverId, initialUnread]);
+  // ✅ FIX (Bug 1): Dependency array mein 'searchQuery' add kiya taaki React ko pata chale ki text change hua hai
+  }, [messages, activeReactId, swipingId, selectedMessages, chatTheme, currentUser.unique_id, receiverId, initialUnread, searchQuery]);
 
   return (
     <div 
-      className={`w-full flex flex-col relative transition-colors overflow-hidden ${getThemeClasses()}`} 
+      // ✅ FIX 4: Added h-[100dvh] fallback and touch-none logic to prevent browser pull-to-refresh jumps
+      className={`w-full flex flex-col relative transition-colors overflow-hidden h-[100dvh] sm:h-full overscroll-none touch-pan-x touch-pan-y ${getThemeClasses()}`} 
       style={{ height: viewportHeight }}
       onClick={handleScreenClick}
     >
-      
+       
       {selectedMessages.length > 0 ? (
         <div className="bg-chatverse text-white px-4 py-3 shadow-md flex justify-between items-center z-50 sticky top-0 transition-all">
           <div className="flex items-center gap-4">
             <button onClick={() => setSelectedMessages([])} className="hover:bg-white/20 p-1.5 rounded-full"><X className="w-6 h-6" /></button>
             <span className="font-bold text-lg">{selectedMessages.length}</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 sm:gap-3">
             {selectedMessages.length === 1 && (
-              <button onClick={() => { setReplyingTo(selectedMessages[0]); setSelectedMessages([]); setTimeout(() => document.getElementById('chat-input')?.focus(), 50); }} className="p-2 hover:bg-white/20 rounded-full"><Reply className="w-5 h-5" /></button>
+              <>
+                <button onClick={() => { setReplyingTo(selectedMessages[0]); setSelectedMessages([]); setTimeout(() => document.getElementById('chat-input')?.focus(), 50); }} className="p-2 hover:bg-white/20 rounded-full transition-colors"><Reply className="w-5 h-5" /></button>
+                
+                {/* ✅ FIX: Edit button removed. Pin Button kept intact. */}
+                <button onClick={() => {
+                  const msgToPin = selectedMessages[0];
+                  const newPinStatus = !msgToPin.is_pinned;
+                  setMessages(messages.map(msg => msg.id === msgToPin.id ? { ...msg, is_pinned: newPinStatus } : msg));
+                  if (socket) socket.emit('toggle_pin_message', { messageId: msgToPin.id, isPinned: newPinStatus, receiverId });
+                  setSelectedMessages([]);
+                }} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.5c0-1.5-2-3.5-2-6.5 0-3.5-2-4.5-3-5V2a2 2 0 0 0-4 0v2c-1 .5-3 1.5-3 5 0 3-2 5-2 6.5Z"/></svg>
+                </button>
+              </>
             )}
             
             <button onClick={() => {
@@ -739,6 +794,7 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
             
             <button onClick={() => { navigator.clipboard.writeText(selectedMessages.map(m => m.content).join('\n')); setSelectedMessages([]); }} className="p-2 hover:bg-white/20 rounded-full"><Copy className="w-5 h-5" /></button>
             
+            {/* Delete For Me */}
             <button onClick={async () => {
               const idsToDelete = selectedMessages.map(m => m.id);
               setMessages((prev) => prev.filter(msg => !idsToDelete.includes(msg.id)));
@@ -748,6 +804,7 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
               } catch(err){}
             }} className="p-2 hover:bg-white/20 rounded-full"><Trash2 className="w-5 h-5" /></button>
             
+            {/* ✅ FIX: Delete For Everyone wapas laga diya! */}
             {selectedMessages.every(m => m.sender_id === currentUser.unique_id) && (
               <button onClick={() => {
                 const ids = selectedMessages.filter(m => m.sender_id === currentUser.unique_id).map(m => m.id);
@@ -798,6 +855,13 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
                 onClick={(e) => e.stopPropagation()} 
                 className="absolute right-0 top-12 w-48 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[100]"
               >
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setShowSearch(true); setShowMenu(false); }} 
+                  className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  Search in Chat
+                </button>
                 <button 
                   onClick={(e) => { 
                     e.stopPropagation(); 
@@ -851,18 +915,71 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
         </div>
       )}
 
+      {/* 💎 PREMIUM: Search Bar UI */}
+      {showSearch && (
+        <div 
+          onClick={(e) => e.stopPropagation()} // ✅ FIX (Bug 2): Background click clash ko roka
+          className="px-4 py-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-700 z-40 animate-slide-up flex items-center gap-3"
+        >
+          <input 
+            autoFocus
+            type="text" 
+            placeholder="Search messages..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-xl text-sm outline-none dark:text-white"
+          />
+          <button onClick={() => { setShowSearch(false); setSearchQuery(''); }} className="text-gray-500 hover:text-gray-800 dark:hover:text-white"><X className="w-5 h-5"/></button>
+        </div>
+      )}
+
+      {/* 💎 PREMIUM: Pinned Message Bar */}
+      {messages.some(m => m.is_pinned && !m.is_deleted_for_everyone) && !showSearch && (
+        <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-md px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/50 shadow-sm z-30 cursor-pointer flex items-center gap-3 transition-colors"
+             onClick={() => scrollToMessage(messages.find(m => m.is_pinned && !m.is_deleted_for_everyone)?.id)}>
+          <div className="w-1 bg-chatverse h-8 rounded-full shrink-0"></div>
+          <div className="flex-1 flex flex-col justify-center min-w-0">
+            <span className="text-[12px] font-bold text-chatverse flex items-center gap-1"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.5c0-1.5-2-3.5-2-6.5 0-3.5-2-4.5-3-5V2a2 2 0 0 0-4 0v2c-1 .5-3 1.5-3 5 0 3-2 5-2 6.5Z"/></svg> Pinned Message</span>
+            <span className="text-[13px] text-gray-600 dark:text-gray-300 truncate font-medium">
+              {messages.find(m => m.is_pinned && !m.is_deleted_for_everyone)?.content}
+            </span>
+          </div>
+          {/* ✅ FIX: Direct Unpin karne ka button */}
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              const msgToUnpin = messages.find(m => m.is_pinned && !m.is_deleted_for_everyone);
+              setMessages(messages.map(msg => msg.id === msgToUnpin.id ? { ...msg, is_pinned: false } : msg));
+              if (socket) socket.emit('toggle_pin_message', { messageId: msgToUnpin.id, isPinned: false, receiverId });
+            }} 
+            className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-gray-600 transition-colors shrink-0"
+          >
+            <X className="w-5 h-5"/>
+          </button>
+        </div>
+      )}
+
       <div 
         className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
       >
+        {/* ✅ FIX (Bug 3): "No Results Found" ka clear message */}
+        {showSearch && searchQuery.trim() !== '' && renderedMessagesList.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500 animate-slide-up">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-3 opacity-50"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <p className="font-medium text-[15px]">No messages found for "{searchQuery}"</p>
+          </div>
+        )}
+
         {renderedMessagesList}
 
         {isTyping && (
           <div className="self-start max-w-[75%] mt-2 mb-2">
-            <div className="px-4 py-3.5 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-[18px] rounded-tl-[4px] shadow-sm flex items-center gap-1.5 w-fit">
-              <div className="w-1.5 h-1.5 bg-chatverse dark:bg-indigo-400 rounded-full animate-bounce"></div>
-              <div className="w-1.5 h-1.5 bg-chatverse dark:bg-indigo-400 rounded-full animate-bounce delay-100"></div>
-              <div className="w-1.5 h-1.5 bg-chatverse dark:bg-indigo-400 rounded-full animate-bounce delay-200"></div>
+            <div className="px-4 py-3.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border border-white/20 dark:border-white/5 rounded-[18px] rounded-tl-[4px] shadow-md flex items-center gap-1.5 w-fit">
+              {/* 💎 Premium Wave Effect 💎 */}
+              <div className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full dot-1"></div>
+              <div className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full dot-2"></div>
+              <div className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full dot-3"></div>
             </div>
           </div>
         )}

@@ -28,6 +28,38 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
+  // 💎 PREMIUM: Universal Online Status & App Focus Tracker
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('chatverse_user'));
+    // ✅ FIX: 'socket' ki jagah 'globalSocket' use karna hai kyunki state ka naam wahi hai
+    if (!user || !user.unique_id || !globalSocket) return;
+
+    const goOnline = () => {
+      // Privacy Check: Agar user ne online hide kiya hai, toh server ko 'join' ping mat bhejo
+      const hideOnline = localStorage.getItem('chatverse_hide_online') === 'true';
+      if (!hideOnline) {
+        globalSocket.emit('join', user.unique_id);
+      }
+    };
+
+    // 1. App load hote hi online aao
+    goOnline();
+
+    // 2. Tab Switch ya App Minimize se wapas aane par turant online aao
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') goOnline();
+    };
+    const handleFocus = () => goOnline();
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [globalSocket]);
+
   useEffect(() => {
     const handleOffline = () => setIsOffline(true);
     const handleOnline = () => setIsOffline(false);
@@ -143,8 +175,8 @@ function App() {
     }
 
     return () => {
-      socketRef.current?.disconnect();
-      document.removeEventListener('click', requestPermissionOnClick); // Memory leak fixed
+      // ✅ FIX: socketRef yahan nahi hai, aur app level par global socket ko disconnect nahi karna hai
+      document.removeEventListener('click', requestPermissionOnClick); 
     };
   }, [isAuthenticated]);
   

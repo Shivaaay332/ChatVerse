@@ -96,7 +96,11 @@ const initializeDatabase = async () => {
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp TEXT;`);
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp_expiry TIMESTAMP;`);
     
-    console.log("✅ Database Tables Auto-Synced! Verified & Privacy Columns Active. Web Push Ready!");
+    // 💎 PREMIUM: Edit aur Pin features ke columns
+    await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;`);
+    await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;`);
+    
+    console.log("✅ Database Tables Auto-Synced! Premium Features Active!");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
 initializeDatabase();
@@ -775,7 +779,8 @@ io.on('connection', (socket) => {
     } catch (err) { console.error("Mark as read error:", err); }
   });
 
-  // ✅ FIX (Root Cause 2): Frontend se Delivery Acknowledgement sunne ke liye taaki sender ko DOUBLE TICK dikhe
+
+  // ✅ FIX: Frontend se Delivery Acknowledgement sunne ke liye taaki sender ko DOUBLE TICK dikhe
   socket.on('message_delivered', async ({ messageId, senderId }) => {
     try {
       await db.query(`UPDATE messages SET status = 'delivered' WHERE id = $1`, [messageId]);
@@ -785,14 +790,20 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ✅ NAYA CODE: Frontend se Delivery Acknowledgement sunne ke liye
-  socket.on('message_delivered', async ({ messageId, senderId }) => {
+  // 💎 PREMIUM: Edit Message Socket
+  socket.on('edit_message', async ({ messageId, newContent, receiverId }) => {
     try {
-      await db.query(`UPDATE messages SET status = 'delivered' WHERE id = $1`, [messageId]);
-      io.to(senderId).emit('message_updated', { id: messageId, status: 'delivered' });
-    } catch (err) { 
-      console.error("Delivery status error:", err); 
-    }
+      await db.query(`UPDATE messages SET content = $1, is_edited = TRUE WHERE id = $2`, [newContent, messageId]);
+      io.to(receiverId).emit('message_updated', { id: messageId, content: newContent, is_edited: true });
+    } catch (err) { console.error("Edit error:", err); }
+  });
+
+  // 💎 PREMIUM: Pin Message Socket
+  socket.on('toggle_pin_message', async ({ messageId, isPinned, receiverId }) => {
+    try {
+      await db.query(`UPDATE messages SET is_pinned = $1 WHERE id = $2`, [isPinned, messageId]);
+      io.to(receiverId).emit('message_updated', { id: messageId, is_pinned: isPinned });
+    } catch (err) { console.error("Pin error:", err); }
   });
 
   socket.on('mark_chat_read', async ({ senderId, receiverId }) => {

@@ -97,13 +97,11 @@ export default function ChatList({ socket }) { // ✅ NAYA: App.jsx se socket li
     // ✅ FIX: Naya socket banana band, sirf global prop use hoga
     if (!socket) return; 
 
-    // ✅ FIX: Screen khulte hi force join taki room fix ho jaye
-    socket.emit('join', currentUser.unique_id);
+    // ✅ FIX: 'join' ab globally App.jsx handle kar raha hai, yahan sirf msgs sync honge
     socket.emit('sync_messages', currentUser.unique_id);
 
     const handleConnect = () => {
-      // ✅ FIX: Agar background se aaye aur reconnect ho, toh wapas join karo
-      socket.emit('join', currentUser.unique_id);
+      // Network drop hone par sirf sync_messages chalega
       socket.emit('sync_messages', currentUser.unique_id);
     };
 
@@ -263,11 +261,12 @@ export default function ChatList({ socket }) { // ✅ NAYA: App.jsx se socket li
   // Yahan se niche aapka return ( ...) statement start hoga
 
   return (
-    <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors">
+    <div className="h-full w-full bg-[#f4f6f8] dark:bg-gray-900 flex flex-col overflow-hidden relative transition-colors duration-500">
       
-      <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-xl pt-[calc(env(safe-area-inset-top)+16px)] pb-3 z-20 shrink-0 border-b border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
+      {/* 💎 Glassmorphism Premium Header 💎 */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-2xl pt-[calc(env(safe-area-inset-top)+16px)] pb-3 z-20 shrink-0 border-b border-white/20 dark:border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.05)] transition-colors duration-500">
         <div className="flex justify-between items-center mb-6 px-4">
-          <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Messages</h1>
+          <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight drop-shadow-sm">Messages</h1>
         </div>
         <div className="relative px-4">
           <Search className="absolute left-8 top-3.5 text-gray-400 dark:text-gray-500 w-5 h-5" />
@@ -275,7 +274,7 @@ export default function ChatList({ socket }) { // ✅ NAYA: App.jsx se socket li
             ref={searchInputRef}
             type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by Unique ID..." 
-            className="w-full pl-12 pr-4 py-3.5 bg-gray-100/80 dark:bg-gray-700 dark:text-white border border-transparent rounded-[20px] text-[15px] font-medium focus:outline-none focus:bg-white dark:focus:bg-gray-600 focus:ring-2 focus:ring-indigo-100 transition-all placeholder-gray-400"
+            className="w-full pl-12 pr-4 py-3.5 bg-gray-200/50 dark:bg-gray-800/50 dark:text-white border border-white/40 dark:border-white/10 rounded-[20px] text-[15px] font-medium focus:outline-none focus:bg-white/90 dark:focus:bg-gray-800/90 focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500 transition-all placeholder-gray-500 shadow-inner"
           />
         </div>
       </div>
@@ -283,12 +282,19 @@ export default function ChatList({ socket }) { // ✅ NAYA: App.jsx se socket li
       <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar pb-24 pt-2">
         {loading ? (
            <div className="flex flex-col gap-5 px-5 py-4 mt-2">
+             {/* 💎 Premium Animated Skeletons 💎 */}
              {[1, 2, 3, 4, 5, 6].map((i) => (
-               <div key={i} className="flex items-center gap-4 animate-pulse">
-                 <div className="w-11 h-11 bg-gray-200 dark:bg-gray-700 rounded-full shrink-0"></div>
-                 <div className="flex-1 flex flex-col gap-2.5">
-                   <div className="w-32 h-3 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
-                   <div className="w-48 h-2 bg-gray-100 dark:bg-gray-600 rounded-full"></div>
+               <div key={i} className="flex items-center gap-4 relative overflow-hidden">
+                 <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-full shrink-0 relative overflow-hidden">
+                   <div className="absolute inset-0 animate-shimmer"></div>
+                 </div>
+                 <div className="flex-1 flex flex-col gap-3">
+                   <div className="w-32 h-3.5 bg-gray-200 dark:bg-gray-700 rounded-full relative overflow-hidden">
+                      <div className="absolute inset-0 animate-shimmer"></div>
+                   </div>
+                   <div className="w-48 h-2.5 bg-gray-100 dark:bg-gray-800 rounded-full relative overflow-hidden">
+                      <div className="absolute inset-0 animate-shimmer" style={{ animationDelay: '0.2s' }}></div>
+                   </div>
                  </div>
                </div>
              ))}

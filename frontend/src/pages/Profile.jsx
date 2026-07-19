@@ -203,10 +203,11 @@ export default function Profile() {
                      onClick={() => { setShowFriendsModal(false); navigate(`/user/${friend.unique_id}`, { state: { user: friend } }) }} 
                      className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer border-b border-gray-50 dark:border-gray-700 last:border-0 transition-colors"
                    >
-                      <div className="w-13 h-13 bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg uppercase shadow-sm shrink-0">
+                      {/* ✅ FIX: Invalid w-13 hatakar w-12 h-12, min-w-[48px] aur aspect-square add kiya */}
+                      <div className="w-12 h-12 min-w-[48px] aspect-square bg-gradient-to-tr from-chatverse to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg uppercase shadow-sm shrink-0">
                          {friend.username.charAt(0)}
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                          <h3 className="font-bold text-[16px] text-gray-900 dark:text-white flex items-center">
                            {friend.username}
                            {friend.is_verified && <BadgeCheck className="w-[15px] h-[15px] text-[#1d9bf0] ml-1 shrink-0" />}
