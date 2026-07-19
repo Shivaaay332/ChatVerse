@@ -65,7 +65,12 @@ const server = http.createServer(app);
 const initializeDatabase = async () => {
   try {
     await db.query(`
-      CREATE TABLE IF NOT EXISTS users (unique_id TEXT PRIMARY KEY, username TEXT NOT NULL, email TEXT UNIQUE NOT NULL, mobile TEXT, age INTEGER, gender TEXT, password_hash TEXT NOT NULL, bio TEXT DEFAULT 'Available on ChatVerse ✨', is_verified BOOLEAN DEFAULT FALSE);
+      /* ✅ FIX: mobile TEXT column completely remove kar diya gaya hai */
+      CREATE TABLE IF NOT EXISTS users (unique_id TEXT PRIMARY KEY, username TEXT NOT NULL, email TEXT UNIQUE NOT NULL, age INTEGER, gender TEXT, password_hash TEXT NOT NULL, bio TEXT DEFAULT 'Available on ChatVerse ✨', is_verified BOOLEAN DEFAULT FALSE);
+      
+      /* ✅ NAYA: Registration ke time temporary OTP save karne ke liye table */
+      CREATE TABLE IF NOT EXISTS registration_otps (email TEXT PRIMARY KEY, otp TEXT NOT NULL, expires_at TIMESTAMP NOT NULL);
+      
       CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, user_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, content TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS friend_requests (id SERIAL PRIMARY KEY, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, receiver_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, sender_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, receiver_id TEXT REFERENCES users(unique_id) ON DELETE CASCADE, content TEXT NOT NULL, status TEXT DEFAULT 'sent', reply_to_id INTEGER, reply_content TEXT, reaction TEXT, is_starred BOOLEAN DEFAULT FALSE, is_deleted_for_me BOOLEAN DEFAULT FALSE, is_deleted_for_everyone BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
@@ -120,15 +125,66 @@ app.post('/api/notifications/subscribe', authenticateToken, async (req, res) => 
 });
 
 // --- AUTH APIs ---
+
+// ✅ NAYA: Sign-up OTP Bhejne ka route (Bina Mobile Number ke)
+app.post('/api/auth/register-otp', async (req, res) => {
+  try {
+    const { unique_id, email } = req.body;
+    const userCheck = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $2', [unique_id, email]);
+    if (userCheck.rows.length > 0) return res.status(400).json({ error: 'ID or Email already exists!' });
+
+    const otp = Math.floor(1000 + Math.random() * 9000).toString(); 
+    const expiry = new Date(Date.now() + 10 * 60000); 
+
+    // Purana OTP overwrite karke naya save karo
+    await db.query(`INSERT INTO registration_otps (email, otp, expires_at) VALUES ($1, $2, $3) ON CONFLICT (email) DO UPDATE SET otp = $2, expires_at = $3`, [email, otp, expiry]);
+
+    try {
+      await transporter.sendMail({
+        from: `"ChatVerse Security" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'ChatVerse - Verify Your Email',
+        html: `<div style="font-family: sans-serif; padding: 20px;">
+                 <h2>Welcome to ChatVerse!</h2>
+                 <p>Your email verification OTP is:</p>
+                 <h1 style="color: #4f46e5; letter-spacing: 5px;">${otp}</h1>
+                 <p>Valid for 10 minutes. Please enter this in the app to create your account.</p>
+               </div>`
+      });
+      res.status(200).json({ message: 'OTP sent to email!' });
+    } catch (emailErr) {
+      console.error("Registration Email Failed:", emailErr);
+      return res.status(500).json({ error: 'Failed to send OTP email.' });
+    }
+  } catch (err) { res.status(500).json({ error: 'Error processing request.' }); }
+});
+
+// ✅ NAYA: OTP Verify karke Account Create karne ka route
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { unique_id, email, mobile, age, gender, password } = req.body;
-    const userCheck = await db.query('SELECT * FROM users WHERE unique_id = $1 OR email = $2', [unique_id, email]);
-    if (userCheck.rows.length > 0) return res.status(400).json({ error: 'ID or Email exists!' });
+    // Mobile number completely removed from request payload
+    const { unique_id, email, age, gender, password, otp } = req.body;
+    
+    // Check OTP
+    const otpCheck = await db.query('SELECT * FROM registration_otps WHERE email = $1', [email]);
+    if (otpCheck.rows.length === 0) return res.status(400).json({ error: 'No OTP requested for this email.' });
+    if (otpCheck.rows[0].otp !== otp) return res.status(400).json({ error: 'Invalid OTP!' });
+    if (new Date() > new Date(otpCheck.rows[0].expires_at)) return res.status(400).json({ error: 'OTP has expired!' });
+
+    // Create User (Mobile column removed)
     const password_hash = await bcrypt.hash(password, await bcrypt.genSalt(10));
-    const newUser = await db.query(`INSERT INTO users (unique_id, username, email, mobile, age, gender, password_hash) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING unique_id, username, is_verified`, [unique_id, unique_id, email, mobile, age, gender, password_hash]);
-    res.status(201).json({ message: 'Account created!', user: newUser.rows[0] });
-  } catch (err) { res.status(500).json({ error: 'Error during signup' }); }
+    const newUser = await db.query(
+      `INSERT INTO users (unique_id, username, email, age, gender, password_hash) VALUES ($1, $2, $3, $4, $5, $6) RETURNING unique_id, username, is_verified`, 
+      [unique_id, unique_id, email, age, gender, password_hash]
+    );
+
+    // Clean up OTP table
+    await db.query('DELETE FROM registration_otps WHERE email = $1', [email]);
+    
+    // Auto-login after creation
+    const token = jwt.sign({ id: newUser.rows[0].unique_id }, ACTIVE_JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ message: 'Account created successfully!', token, user: newUser.rows[0] });
+  } catch (err) { res.status(500).json({ error: 'Error during account creation' }); }
 });
 
 app.post('/api/auth/login', async (req, res) => {

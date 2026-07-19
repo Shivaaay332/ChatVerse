@@ -4,19 +4,24 @@ import api from '../api';
 
 export default function AuthScreen({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
+  
+  // ✅ FIX: Mobile completely removed from state
   const [formData, setFormData] = useState({
-    unique_id: '', username: '', email: '', mobile: '', password: '', gender: 'Male'
+    unique_id: '', username: '', email: '', password: '', gender: 'Male'
   });
   const [error, setError] = useState('');
-  
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [valErrors, setValErrors] = useState({});
 
-  // ✅ NAYA: Forgot Password ke states
+  // Forgot Password states
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [otpStep, setOtpStep] = useState(1); 
   const [resetData, setResetData] = useState({ email: '', otp: '', newPassword: '' });
+
+  // ✅ NAYA: Sign-Up OTP verification states
+  const [registerStep, setRegisterStep] = useState(1);
+  const [registerOtp, setRegisterOtp] = useState('');
 
   const handleUniqueIdChange = (e) => {
     const sanitized = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -34,8 +39,8 @@ export default function AuthScreen({ onLogin }) {
     if (!isLogin) {
       if (formData.unique_id.length < 3) errors.unique_id = 'Must be at least 3 chars.';
       if (formData.username.trim().length < 2) errors.username = 'Name is required.';
-      if (formData.mobile && !/^\d{10}$/.test(formData.mobile)) errors.mobile = 'Enter valid 10-digit number.';
     }
+    // ✅ FIX: Mobile validation completely deleted
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = 'Enter a valid email.';
     if (formData.password.length < 6) errors.password = 'Must be at least 6 chars.';
     
@@ -47,26 +52,39 @@ export default function AuthScreen({ onLogin }) {
     e.preventDefault();
     setError('');
     
-    if (!validateForm()) return;
+    // Login flow
+    if (isLogin) {
+      if (!validateForm()) return;
+      setIsLoading(true);
+      try {
+        const res = await api.post('/auth/login', { email: formData.email, password: formData.password });
+        onLogin(res.data.user, res.data.token);
+      } catch (err) { setError(err.response?.data?.error || 'Invalid credentials.'); }
+      setIsLoading(false);
+      return;
+    }
 
-    setIsLoading(true);
-    try {
-      const endpoint = isLogin ? '/auth/login' : '/auth/register';
-      const payload = isLogin ? { email: formData.email, password: formData.password } : formData;
-      const res = await api.post(endpoint, payload);
-      onLogin(res.data.user, res.data.token);
-    } catch (err) {
-      if (isLogin) {
-        setError('Invalid email or password.');
-      } else {
-        const backendError = err.response?.data?.error || 'Registration failed.';
-        if (backendError.toLowerCase().includes('exists')) {
-           setError('Account with this email or ID already exists.');
-        } else {
-           setError('An unexpected error occurred. Please try again.');
-        }
-      }
-    } finally {
+    // Sign Up Flow Step 1: Request OTP
+    if (registerStep === 1) {
+      if (!validateForm()) return;
+      setIsLoading(true);
+      try {
+        await api.post('/auth/register-otp', { unique_id: formData.unique_id, email: formData.email });
+        setRegisterStep(2); // Go to OTP screen
+      } catch (err) { setError(err.response?.data?.error || 'Failed to send OTP.'); }
+      setIsLoading(false);
+      return;
+    }
+
+    // Sign Up Flow Step 2: Verify OTP & Create Account
+    if (registerStep === 2) {
+      if (registerOtp.length !== 4) { setError('Enter 4-digit OTP.'); return; }
+      setIsLoading(true);
+      try {
+        // Send formData along with OTP
+        const res = await api.post('/auth/register', { ...formData, otp: registerOtp });
+        onLogin(res.data.user, res.data.token); // Auto-login on success
+      } catch (err) { setError(err.response?.data?.error || 'Invalid or expired OTP.'); }
       setIsLoading(false);
     }
   };
@@ -77,6 +95,8 @@ export default function AuthScreen({ onLogin }) {
     setValErrors({});
     setIsForgotPassword(false);
     setOtpStep(1);
+    setRegisterStep(1); // Reset registration step
+    setRegisterOtp('');
   };
 
   // ✅ NAYA: OTP bhejne ka function
@@ -163,7 +183,7 @@ export default function AuthScreen({ onLogin }) {
           <button type="button" onClick={() => {setIsForgotPassword(false); setOtpStep(1); setError('');}} className="text-gray-500 font-bold text-[14px] hover:underline mt-2">Back to Login</button>
         </form>
       ) : (
-      <form onSubmit={handleSubmit} className="flex-1 px-6 flex flex-col gap-4 pb-12">
+      <form onSubmit={handleSubmit} className="flex-1 px-6 flex flex-col gap-4 pb-12 animate-slide-up">
         
         {error && (
           <div className="bg-red-50 dark:bg-red-900/30 text-red-500 border border-red-200 dark:border-red-800 text-[13px] font-bold px-4 py-3 rounded-2xl text-center">
@@ -171,99 +191,88 @@ export default function AuthScreen({ onLogin }) {
           </div>
         )}
 
-        {!isLogin && (
-          <>
-            <div className="flex flex-col gap-1">
-              <div className="relative">
-                <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input 
-                  type="text" name="unique_id" value={formData.unique_id} onChange={handleUniqueIdChange} 
-                  placeholder="Unique ID (e.g. rahul_99)"
-                  className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.unique_id ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse dark:focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-900/30 transition-all font-semibold placeholder-gray-400`}
-                />
+        {!isLogin && registerStep === 2 ? (
+          // ✅ NAYA: Cool OTP UI for Registration (Mobile UI gaya kachre mein!)
+          <div className="animate-slide-up">
+            <div className="text-center mb-4 mt-2">
+              <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-900/30 text-chatverse rounded-full flex items-center justify-center mx-auto mb-3">
+                <Mail className="w-8 h-8" />
               </div>
-              {valErrors.unique_id && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.unique_id}</span>}
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Verify Your Email</h2>
+              <p className="text-[13px] text-gray-500 mt-1">Enter the 4-digit OTP sent to <br/><b className="text-gray-700 dark:text-gray-300">{formData.email}</b></p>
             </div>
+            
+            <div className="flex flex-col gap-1 mb-2">
+              <input 
+                type="text" maxLength="4" value={registerOtp} onChange={(e) => { setRegisterOtp(e.target.value); setError(''); }} 
+                placeholder="4-Digit OTP" 
+                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white px-5 py-4 rounded-2xl outline-none focus:border-chatverse text-center font-black tracking-widest text-2xl shadow-sm" 
+              />
+            </div>
+            
+            <button type="button" onClick={() => { setRegisterStep(1); setRegisterOtp(''); setError(''); }} className="text-gray-500 font-bold text-[13px] hover:underline text-center w-full">
+              Incorrect email? Go back.
+            </button>
+          </div>
+        ) : (
+          // Normal Login & Sign-Up Step 1 UI
+          <>
+            {!isLogin && (
+              <>
+                <div className="flex flex-col gap-1">
+                  <div className="relative">
+                    <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input type="text" name="unique_id" value={formData.unique_id} onChange={handleUniqueIdChange} placeholder="Unique ID (e.g. rahul_99)" className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.unique_id ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse font-semibold placeholder-gray-400`} />
+                  </div>
+                  {valErrors.unique_id && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.unique_id}</span>}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input type="text" name="username" value={formData.username} onChange={handleChange} placeholder="Full Name" className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.username ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse font-semibold placeholder-gray-400`} />
+                  </div>
+                  {valErrors.username && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.username}</span>}
+                </div>
+              </>
+            )}
 
             <div className="flex flex-col gap-1">
               <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input 
-                  type="text" name="username" value={formData.username} onChange={handleChange} 
-                  placeholder="Full Name"
-                  className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.username ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse dark:focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-900/30 transition-all font-semibold placeholder-gray-400`}
-                />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input type="email" name="email" value={formData.email} onChange={handleChange} placeholder="Email Address" className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.email ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse font-semibold placeholder-gray-400`} />
               </div>
-              {valErrors.username && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.username}</span>}
+              {valErrors.email && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.email}</span>}
             </div>
+
+            {/* ✅ FIX: Yahan se Mobile Number wala field completely hata diya gaya hai! */}
+
+            <div className="flex flex-col gap-1">
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input type={showPassword ? "text" : "password"} name="password" value={formData.password} onChange={handleChange} placeholder="Password" className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.password ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white pl-12 pr-12 py-3.5 rounded-2xl outline-none focus:border-chatverse font-semibold placeholder-gray-400`} />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+              {valErrors.password && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.password}</span>}
+            </div>
+
+            {!isLogin && (
+              <div className="flex flex-col gap-2 mt-1">
+                <span className="text-[12px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider pl-1">Gender</span>
+                <div className="flex items-center gap-2">
+                  {['Male', 'Female', 'Other'].map(g => (
+                    <button key={g} type="button" onClick={() => setFormData({ ...formData, gender: g })} className={`flex-1 py-2.5 rounded-xl font-bold text-[13px] transition-all border ${formData.gender === g ? 'bg-chatverse text-white border-chatverse shadow-md shadow-indigo-500/20' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'}`}>
+                      {g}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
 
-        <div className="flex flex-col gap-1">
-          <div className="relative">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input 
-              type="email" name="email" value={formData.email} onChange={handleChange} 
-              placeholder="Email Address"
-              className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.email ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse dark:focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-900/30 transition-all font-semibold placeholder-gray-400`}
-            />
-          </div>
-          {valErrors.email && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.email}</span>}
-        </div>
-
-        {!isLogin && (
-          <div className="flex flex-col gap-1">
-            <div className="relative">
-              <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input 
-                type="tel" name="mobile" value={formData.mobile} onChange={handleChange} 
-                placeholder="Mobile Number"
-                className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.mobile ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse dark:focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-900/30 transition-all font-semibold placeholder-gray-400`}
-              />
-            </div>
-            {valErrors.mobile && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.mobile}</span>}
-          </div>
-        )}
-
-        <div className="flex flex-col gap-1">
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input 
-              type={showPassword ? "text" : "password"} 
-              name="password" value={formData.password} onChange={handleChange} 
-              placeholder="Password"
-              className={`w-full bg-gray-50 dark:bg-gray-800 border ${valErrors.password ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'} text-gray-900 dark:text-white pl-12 pr-12 py-3.5 rounded-2xl outline-none focus:border-chatverse dark:focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-900/30 transition-all font-semibold placeholder-gray-400`}
-            />
-            <button 
-              type="button" 
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            >
-              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
-          {valErrors.password && <span className="text-red-500 text-[11px] font-bold pl-2">{valErrors.password}</span>}
-        </div>
-
-        {!isLogin && (
-          <div className="flex flex-col gap-2 mt-1">
-            <span className="text-[12px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider pl-1">Gender</span>
-            <div className="flex items-center gap-2">
-              {['Male', 'Female', 'Other'].map(g => (
-                <button
-                  key={g}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, gender: g })}
-                  className={`flex-1 py-2.5 rounded-xl font-bold text-[13px] transition-all border ${formData.gender === g ? 'bg-chatverse text-white border-chatverse shadow-md shadow-indigo-500/20' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'}`}
-                >
-                  {g}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ✅ NAYA: Forgot Password Link (Sirf Login tab me dikhega) */}
         {isLogin && (
           <div className="flex justify-end pr-1 -mt-1">
             <button type="button" onClick={() => setIsForgotPassword(true)} className="text-chatverse dark:text-indigo-400 font-bold text-[13px] hover:underline">
@@ -272,24 +281,15 @@ export default function AuthScreen({ onLogin }) {
           </div>
         )}
 
-        <button 
-          type="submit" 
-          disabled={isLoading}
-          className={`mt-4 w-full text-white font-black py-4 rounded-2xl transition-all flex justify-center items-center gap-2 shadow-xl shadow-indigo-500/20 ${isLoading ? 'bg-indigo-400 scale-[0.98]' : 'bg-chatverse hover:bg-indigo-700 active:scale-[0.98]'}`}
-        >
-          {isLoading ? <Loader className="w-5 h-5 animate-spin" /> : (isLogin ? 'Sign In' : 'Create Account')}
+        <button type="submit" disabled={isLoading} className={`mt-4 w-full text-white font-black py-4 rounded-2xl transition-all flex justify-center items-center gap-2 shadow-xl shadow-indigo-500/20 ${isLoading ? 'bg-indigo-400 scale-[0.98]' : 'bg-chatverse hover:bg-indigo-700 active:scale-[0.98]'}`}>
+          {isLoading ? <Loader className="w-5 h-5 animate-spin mx-auto" /> : (isLogin ? 'Sign In' : (registerStep === 1 ? 'Continue' : 'Verify & Create Account'))}
         </button>
 
         <div className="mt-6 flex items-center justify-center gap-1.5">
           <span className="text-gray-500 dark:text-gray-400 font-medium text-[14px]">
             {isLogin ? "Don't have an account?" : "Already have an account?"}
           </span>
-          <button 
-            type="button" 
-            onClick={toggleAuth} 
-            disabled={isLoading}
-            className="text-chatverse dark:text-indigo-400 font-black text-[14px] hover:underline"
-          >
+          <button type="button" onClick={toggleAuth} disabled={isLoading} className="text-chatverse dark:text-indigo-400 font-black text-[14px] hover:underline">
             {isLogin ? 'Sign Up' : 'Sign In'}
           </button>
         </div>
