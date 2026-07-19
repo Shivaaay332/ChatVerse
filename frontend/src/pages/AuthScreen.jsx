@@ -296,7 +296,6 @@ export default function AuthScreen({ onLogin }) {
         
       </form>
       )}
-      )&rbrace;
     </div>
   );
 }

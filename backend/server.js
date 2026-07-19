@@ -143,13 +143,15 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
     await db.query(`UPDATE users SET reset_otp = $1, reset_otp_expiry = $2 WHERE email = $3`, [otp, expiry, email]);
 
-    await transporter.sendMail({
+    // ✅ FIX: 'await' hata diya hai taaki email background mein jaye aur frontend ko wait na karna pade
+    transporter.sendMail({
       from: process.env.EMAIL_USER || 'your_email@gmail.com',
       to: email,
       subject: 'ChatVerse - Password Reset OTP',
       html: `<h2>Your OTP is: <b style="color: #4f46e5;">${otp}</b></h2><p>This OTP is valid for 10 minutes. Do not share it with anyone.</p>`
-    });
+    }).catch(err => console.error("Background Email Error:", err)); // Agar email fail hua toh server log me dikhega par app hang nahi hogi
 
+    // Frontend ko turant response mil jayega
     res.status(200).json({ message: 'OTP sent successfully!' });
   } catch (err) { 
     console.error(err);
