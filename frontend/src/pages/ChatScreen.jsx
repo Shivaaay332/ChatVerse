@@ -104,10 +104,19 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
     if (!socket) return; 
 
     setIsConnected(socket.connected);
-    socket.on('connect', () => isMounted && setIsConnected(true));
-    socket.on('disconnect', () => isMounted && setIsConnected(false));
-
+    
+    // ✅ FIX: Room reconnect aur instant online status active karne ke liye
+    socket.emit('join', currentUser.unique_id);
     socket.emit('check_companion_status', { targetId: receiverId });
+
+    const handleConnect = () => {
+      if (isMounted) setIsConnected(true);
+      socket.emit('join', currentUser.unique_id); // Network drop ke baad re-join
+      socket.emit('check_companion_status', { targetId: receiverId });
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', () => isMounted && setIsConnected(false));
 
     api.get(`/messages/${receiverId}`).then(res => {
       if (!isMounted) return; 
@@ -144,6 +153,9 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
     const handleReceiveMessage = (msg) => {
       if (msg.sender_id === receiverId || msg.receiver_id === receiverId) {
         setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
+        
+        // ✅ FIX: Message aate hi Server ko Delivery (2 Ticks) ka confirmation bhejo
+        socket.emit('message_delivered', { messageId: msg.id, senderId: msg.sender_id });
         
         if (!hideReadReceiptsRef.current && msg.sender_id === receiverId) {
           socket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
@@ -782,23 +794,43 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
               <MoreVertical className="w-5 h-5" />
             </button>
             {showMenu && (
-              <div className="absolute right-0 top-12 w-48 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[100]">
-                <button onClick={() => { setShowMenu(false); setShowSoundModal(false); setShowThemeModal(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
+              <div 
+                onClick={(e) => e.stopPropagation()} 
+                className="absolute right-0 top-12 w-48 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-[100]"
+              >
+                <button 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setShowThemeModal(true); 
+                    setShowMenu(false); 
+                  }} 
+                  className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50"
+                >
                   <Palette className="w-4 h-4 text-chatverse" /> Chat Theme
                 </button>
                 <button 
-                  onClick={() => { 
+                  onClick={(e) => { 
+                    e.stopPropagation();
                     setPreviewChatTone(localStorage.getItem(`cv_sound_${receiverId}`) || 'default');
-                    setShowMenu(false); 
-                    setShowThemeModal(false);
                     setShowSoundModal(true); 
+                    setShowMenu(false); 
                   }} 
                   className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50"
                 >
                   <Music className="w-4 h-4 text-indigo-400" /> Chat Tone
                 </button>
                 
-                <button onClick={() => { setMessages([]); setShowMenu(false); api.delete(`/chats/${receiverId}`); }} className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 font-semibold transition-colors">Clear Chat Now</button>
+                <button 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setMessages([]); 
+                    setShowMenu(false); 
+                    api.delete(`/chats/${receiverId}`); 
+                  }} 
+                  className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 font-semibold transition-colors"
+                >
+                  Clear Chat Now
+                </button>
               </div>
             )}
           </div>
@@ -965,6 +997,41 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ✅ NAYA CODE: Missing Chat Theme Modal Yahan Add Kiya Gaya Hai */}
+      {showThemeModal && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4" onClick={() => setShowThemeModal(false)}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-[24px] p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+            <h3 className="font-black text-lg text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <Palette className="w-5 h-5 text-chatverse" /> Chat Theme
+            </h3>
+            
+            <div className="grid grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto no-scrollbar pb-2 px-1">
+              {[
+                { id: 'default', name: 'Default', bg: 'bg-[#F0F2F5] dark:bg-gray-900 border border-gray-200 dark:border-gray-700' },
+                { id: 'sunset', name: 'Sunset', bg: 'bg-gradient-to-br from-rose-200 to-orange-200' },
+                { id: 'emerald', name: 'Emerald', bg: 'bg-gradient-to-br from-emerald-200 to-teal-200' },
+                { id: 'midnight', name: 'Midnight', bg: 'bg-gradient-to-br from-indigo-200 to-purple-300' },
+                { id: 'romantic', name: 'Romantic', bg: 'bg-gradient-to-br from-pink-200 to-rose-300 dark:from-[#3d0b1f] dark:to-[#1a050d]' },
+                { id: 'valentine', name: 'Valentine', bg: 'bg-gradient-to-br from-red-200 to-pink-300 dark:from-[#6b051d] dark:to-[#2e020c]' }
+              ].map(theme => (
+                <button 
+                  key={theme.id} 
+                  onClick={() => applyTheme(theme.id)}
+                  className={`flex flex-col items-center p-3 rounded-2xl transition-all border-2 ${chatTheme === theme.id ? 'border-chatverse bg-indigo-50 dark:bg-indigo-900/30 scale-[1.02] shadow-sm' : 'border-transparent bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                >
+                  <div className={`w-full h-12 rounded-xl mb-2 shadow-inner ${theme.bg}`}></div>
+                  <span className="font-bold text-[13px] text-gray-800 dark:text-gray-100">{theme.name}</span>
+                </button>
+              ))}
+            </div>
+            
+            <button onClick={() => setShowThemeModal(false)} className="w-full mt-4 bg-gray-100 dark:bg-gray-700 font-bold py-3.5 rounded-xl text-gray-800 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+              Cancel
+            </button>
           </div>
         </div>
       )}

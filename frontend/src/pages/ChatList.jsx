@@ -94,92 +94,84 @@ export default function ChatList({ socket }) { // ✅ NAYA: App.jsx se socket li
     window.addEventListener('chatverse_settings_updated', syncOnFocusOrUpdate);
     window.addEventListener('chatverse_chat_read', syncOnFocusOrUpdate);
 
-    const newSocket = io(SOCKET_URL, {
-      transports: ['websocket'], 
-      reconnectionAttempts: 5
-    });
-    
-    newSocket.emit('join', currentUser.unique_id);
+    // ✅ FIX: Naya socket banana band, sirf global prop use hoga
+    if (!socket) return; 
 
-    newSocket.on('connect', () => {
-      newSocket.emit('sync_messages', currentUser.unique_id);
-    });
+    // ✅ FIX: Screen khulte hi force join taki room fix ho jaye
+    socket.emit('join', currentUser.unique_id);
+    socket.emit('sync_messages', currentUser.unique_id);
 
-    newSocket.on('sync_complete', (syncedChats) => {
+    const handleConnect = () => {
+      // ✅ FIX: Agar background se aaye aur reconnect ho, toh wapas join karo
+      socket.emit('join', currentUser.unique_id);
+      socket.emit('sync_messages', currentUser.unique_id);
+    };
+
+    const handleSyncComplete = (syncedChats) => {
       if (!isMountedRef.current) return;
       setRecentChats(syncedChats.filter(c => !deletedChatsRef.current.has(c.unique_id)));
-    });
+    };
 
-    newSocket.on('receive_message', (message) => {
+    const handleReceiveMessage = (message) => {
       if (!isMountedRef.current) return;
-
       const senderId = message?.sender_id;
 
       if (senderId) {
         setTypingUsers(prev => ({ ...prev, [senderId]: false }));
-        if (typingTimeouts.current[senderId]) {
-          clearTimeout(typingTimeouts.current[senderId]);
-        }
+        if (typingTimeouts.current[senderId]) clearTimeout(typingTimeouts.current[senderId]);
       }
 
       if (senderId || message?.receiver_id) {
         setRecentChats(prevChats => {
-          const chatIndex = prevChats.findIndex(c => 
-            c.unique_id === senderId || c.unique_id === message.receiver_id
-          );
-
+          const chatIndex = prevChats.findIndex(c => c.unique_id === senderId || c.unique_id === message.receiver_id);
           if (chatIndex > -1) {
             const updatedChat = { 
               ...prevChats[chatIndex], 
               last_message: message.text || message.content || "📷 Attachment",
               last_message_time: new Date().toISOString(),
-              unread_count: senderId !== currentUser.unique_id 
-                            ? Number(prevChats[chatIndex].unread_count || 0) + 1 
-                            : 0
+              unread_count: senderId !== currentUser.unique_id ? Number(prevChats[chatIndex].unread_count || 0) + 1 : 0
             };
             const newChats = [...prevChats];
             newChats.splice(chatIndex, 1);
             newChats.unshift(updatedChat); 
             return newChats;
           } else {
-            // NEW FIX: Agar completely NAYA user message kare, SIRF TABHI backend ko hit karo
             if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
-            fetchTimeoutRef.current = setTimeout(() => {
-              if (isMountedRef.current) fetchChatsAndFriends();
-            }, 1000);
+            fetchTimeoutRef.current = setTimeout(() => { if (isMountedRef.current) fetchChatsAndFriends(); }, 1000);
             return prevChats;
           }
         });
       }
-      
-      // Removed the brutal fetchTimeoutRef from here completely to prevent DDoS
-    });
+    };
 
-    newSocket.on('message_updated', () => {
-      // FIX: Sirf UI refresh ke liye trigger karo agar status check zaroori ho, 
-      // otherwise hum is API call ko remove kar rahe hain taaki DB safe rahe.
-    });
-
-    newSocket.on('typing', (senderId) => {
+    const handleTyping = (senderId) => {
       if (!isMountedRef.current) return;
       setTypingUsers(prev => ({ ...prev, [senderId]: true }));
       if (typingTimeouts.current[senderId]) clearTimeout(typingTimeouts.current[senderId]);
-      
       typingTimeouts.current[senderId] = setTimeout(() => {
         if (isMountedRef.current) setTypingUsers(prev => ({ ...prev, [senderId]: false }));
       }, 2500);
-    });
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('sync_complete', handleSyncComplete);
+    socket.on('receive_message', handleReceiveMessage);
+    socket.on('typing', handleTyping);
 
     return () => {
       window.removeEventListener('focus', syncOnFocusOrUpdate);
       window.removeEventListener('chatverse_settings_updated', syncOnFocusOrUpdate);
       window.removeEventListener('chatverse_chat_read', syncOnFocusOrUpdate);
-
       if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
       Object.values(typingTimeouts.current).forEach(clearTimeout); 
-      newSocket.disconnect();
+      
+      // ✅ FIX: Disconnect NAHI karna, bas listeners remove karna hai
+      socket.off('connect', handleConnect);
+      socket.off('sync_complete', handleSyncComplete);
+      socket.off('receive_message', handleReceiveMessage);
+      socket.off('typing', handleTyping);
     };
-  }, [currentUser.unique_id]);
+  }, [currentUser.unique_id, socket]);
 
   // Yeh missing ho gaya tha! (Search logic)
   // NEW FIX: Memory leak protection in Search

@@ -97,17 +97,20 @@ function App() {
     // ✅ NAYA: Global Socket Connection (Fast websocket mode)
     const socket = io(SOCKET_URL, { transports: ['websocket'] });
     setGlobalSocket(socket);
-    socket.emit('join', user?.unique_id);
+    
+    // ✅ FIX (Root Cause 1): Ab agar network toota aur wapas aaya, toh auto-join ho jayega!
+    socket.on('connect', () => {
+      socket.emit('join', user?.unique_id);
+    });
 
     socket.on('receive_message', (msg) => {
-      // ✅ FIX: Jaise hi message aaye, server ko batao taaki sender ko DOUBLE TICK dikhe
+      // ✅ FIX (Root Cause 4): Jaise hi message device par aaye, server ko "delivered" (Double Tick) ke liye batao
       socket.emit('message_delivered', { messageId: msg.id, senderId: msg.sender_id });
 
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
       new Audio(`/sounds/${defaultTone}.mp3`).play().catch(() => {}); 
     });
-
     // FIX 4: Optimized Push Subscription (No API Spam)
     const setupPushNotification = async () => {
       if ('serviceWorker' in navigator && 'PushManager' in window) {
