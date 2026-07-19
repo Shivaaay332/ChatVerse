@@ -19,7 +19,7 @@ const formatTime = (dateString) => {
   }
 };
 
-export default function ChatList() {
+export default function ChatList({ socket }) { // ✅ NAYA: App.jsx se socket liya
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('chatverse_user')) || { unique_id: '' };
   

@@ -5,7 +5,7 @@ import { io } from 'socket.io-client';
 import api from '../api';
 import { SOCKET_URL } from '../api';
 
-export default function ChatScreen() {
+export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket liya
   const navigate = useNavigate();
   const location = useLocation();
   const friendName = location.state?.name || "Friend";
@@ -90,79 +90,63 @@ export default function ChatScreen() {
   const [newMsgBadge, setNewMsgBadge] = useState(false); 
   const pressTimer = useRef(null);
   const longPressTriggered = useRef(false);
-  const [socket, setSocket] = useState(null);
+  // ✅ Yahan se local socket state hata di hai
 
   const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   // ==============================================================
-  // MAIN SOCKET & CHAT LOGIC (Fully Optimized)
+  // MAIN SOCKET & CHAT LOGIC (Global Socket Integrated)
   // ==============================================================
   useEffect(() => {
     let isMounted = true; 
-    // BUG 3 FIX: Reconnection logic aur single instance 
-    const newSocket = io(SOCKET_URL, {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
-    setSocket(newSocket);
+    
+    // ✅ NAYA: Ab naya connection nahi banega, purana hi use hoga (Instant load)
+    if (!socket) return; 
 
-    // BUG 7 FIX: Connection Status tracking
-    newSocket.on('connect', () => isMounted && setIsConnected(true));
-    newSocket.on('disconnect', () => isMounted && setIsConnected(false));
+    setIsConnected(socket.connected);
+    socket.on('connect', () => isMounted && setIsConnected(true));
+    socket.on('disconnect', () => isMounted && setIsConnected(false));
 
-    newSocket.emit('join', currentUser.unique_id);
-    newSocket.emit('check_companion_status', { targetId: receiverId });
+    socket.emit('check_companion_status', { targetId: receiverId });
 
-    // BUG 6 FIX: API Call Memory Leak Prevention
     api.get(`/messages/${receiverId}`).then(res => {
       if (!isMounted) return; 
-      
       const fetchedMessages = res.data;
       const unreads = fetchedMessages.filter(m => m.sender_id === receiverId && m.status !== 'read');
-      if (unreads.length > 0) {
-        setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
-      }
+      if (unreads.length > 0) setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
       setMessages(fetchedMessages);
 
-      setTimeout(() => {
-        endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' });
-      }, 100);
+      setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' }), 100);
 
       if (!hideReadReceiptsRef.current && unreads.length > 0) {
-        setMessages(prev => prev.map(m => 
-          (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m
-        ));
-        newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
+        setMessages(prev => prev.map(m => (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m));
+        socket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
       }
     }).catch(err => console.log(err));
 
-    newSocket.on('companion_status_result', (data) => {
+    // Saare event listeners ko functions me banaya hai taaki clean up ho sake
+    const handleCompanionStatus = (data) => {
       if (data.targetId === receiverId) {
         setIsOnline(data.isOnline);
         if (data.lastSeen) setLastSeenTime(data.lastSeen);
       }
-    });
+    };
 
-    newSocket.on('user_online', (uid) => { if (uid === receiverId) setIsOnline(true); });
-    newSocket.on('user_offline', (data) => {
+    const handleUserOnline = (uid) => { if (uid === receiverId) setIsOnline(true); };
+    const handleUserOffline = (data) => {
       const uid = typeof data === 'string' ? data : data?.userId;
       if (uid === receiverId) {
         setIsOnline(false);
         setLastSeenTime(data?.lastSeen || new Date().toISOString());
       }
-    });
+    };
 
-    // BUG 1 & 8 FIX: Echo Chamber and Scroll Hijacker fixed
     const handleReceiveMessage = (msg) => {
       if (msg.sender_id === receiverId || msg.receiver_id === receiverId) {
-        setMessages(prev => {
-          if (prev.some(m => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
+        setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
         
-        // BUG 11 FIX: Dynamic Read Receipt Emit 
         if (!hideReadReceiptsRef.current && msg.sender_id === receiverId) {
-          newSocket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
+          socket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
         }
         
         if (msg.sender_id === receiverId) {
@@ -173,55 +157,61 @@ export default function ChatScreen() {
               audio.volume = 0.5; audio.play();
             } catch (e) {}
           }
-          // STRICT SCROLL CHECK
-          if (isScrolledUpRef.current) {
-            setNewMsgBadge(true);
-          } else {
-            setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-          }
+          if (isScrolledUpRef.current) setNewMsgBadge(true);
+          else setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
         }
       }
     };
-    newSocket.on('receive_message', handleReceiveMessage);
 
-    // BUG 2 FIX: Functional updates properly used
-    newSocket.on('messages_read_bulk', ({ readerId }) => {
+    const handleMessagesReadBulk = ({ readerId }) => {
       if (readerId === receiverId) {
-        setMessages(prev => prev.map(msg => 
-          (msg.sender_id === currentUser.unique_id && msg.status !== 'read') ? { ...msg, status: 'read' } : msg
-        ));
+        setMessages(prev => prev.map(msg => (msg.sender_id === currentUser.unique_id && msg.status !== 'read') ? { ...msg, status: 'read' } : msg));
       }
-    });
+    };
 
-    newSocket.on('typing', (senderId) => {
+    const handleTyping = (senderId) => {
       if (senderId === receiverId) {
         setIsTyping(true); setIsOnline(true); setLastSeenTime(new Date().toISOString()); 
-        if (!isScrolledUpRef.current) {
-          setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-        }
+        if (!isScrolledUpRef.current) setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 2000);
       }
-    });
+    };
 
-    newSocket.on('message_status', ({ tempId, status, realId }) => {
-      setMessages((prev) => prev.map(msg => msg.tempId === tempId ? { ...msg, status, id: realId } : msg));
-    });
+    const handleMessageStatus = ({ tempId, status, realId }) => setMessages((prev) => prev.map(msg => msg.tempId === tempId ? { ...msg, status, id: realId } : msg));
+    const handleMessageUpdated = (updatedData) => setMessages((prev) => prev.map(msg => msg.id === updatedData.id ? { ...msg, ...updatedData } : msg));
+    const handleThemeUpdated = ({ themeId }) => { setChatTheme(themeId); localStorage.setItem(`cv_theme_${receiverId}`, themeId); };
 
-    newSocket.on('message_updated', (updatedData) => {
-      setMessages((prev) => prev.map(msg => msg.id === updatedData.id ? { ...msg, ...updatedData } : msg));
-    });
-
-    newSocket.on('theme_updated', ({ themeId }) => {
-      setChatTheme(themeId); localStorage.setItem(`cv_theme_${receiverId}`, themeId);
-    });
+    // Events Attach karna
+    socket.on('companion_status_result', handleCompanionStatus);
+    socket.on('user_online', handleUserOnline);
+    socket.on('user_offline', handleUserOffline);
+    socket.on('receive_message', handleReceiveMessage);
+    socket.on('messages_read_bulk', handleMessagesReadBulk);
+    socket.on('typing', handleTyping);
+    socket.on('message_status', handleMessageStatus);
+    socket.on('message_updated', handleMessageUpdated);
+    socket.on('theme_updated', handleThemeUpdated);
 
     return () => {
       isMounted = false; 
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      newSocket.disconnect(); // Proper Teardown
+      
+      // ✅ NAYA: Ab socket disconnect nahi hoga, sirf listeners remove honge. 
+      // Isse lag aur multi-socket bug solve ho jata hai.
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('companion_status_result', handleCompanionStatus);
+      socket.off('user_online', handleUserOnline);
+      socket.off('user_offline', handleUserOffline);
+      socket.off('receive_message', handleReceiveMessage);
+      socket.off('messages_read_bulk', handleMessagesReadBulk);
+      socket.off('typing', handleTyping);
+      socket.off('message_status', handleMessageStatus);
+      socket.off('message_updated', handleMessageUpdated);
+      socket.off('theme_updated', handleThemeUpdated);
     };
-  }, [receiverId, currentUser.unique_id]); // DEPENDENCY ARRAY SE `hideReadReceipts` HATA DIYA TO STOP MULTIPLE SOCKETS
+  }, [receiverId, currentUser.unique_id, socket]);
     
   // BUG 12 FIX: Safe UTC Timezone Parsing
   const parseSafeUTC = (dateString) => {

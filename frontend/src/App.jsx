@@ -20,7 +20,7 @@ import api from './api';
 
 function App() {
   const navigate = useNavigate();
-  const socketRef = useRef(null); // FIX 1: Single Socket Instance (Memory & DDoS prevention)
+  const [globalSocket, setGlobalSocket] = useState(null); // ✅ NAYA: Global Socket State
   
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -94,15 +94,18 @@ function App() {
     
     const user = JSON.parse(localStorage.getItem('chatverse_user'));
     
-    // FIX 1: Only 1 Socket Instance
-    socketRef.current = io(SOCKET_URL);
-    socketRef.current.emit('join', user?.unique_id);
+    // ✅ NAYA: Global Socket Connection (Fast websocket mode)
+    const socket = io(SOCKET_URL, { transports: ['websocket'] });
+    setGlobalSocket(socket);
+    socket.emit('join', user?.unique_id);
 
-    // FIX 3: Autoplay Audio Policy Fix
-    socketRef.current.on('receive_message', (msg) => {
+    socket.on('receive_message', (msg) => {
+      // ✅ FIX: Jaise hi message aaye, server ko batao taaki sender ko DOUBLE TICK dikhe
+      socket.emit('message_delivered', { messageId: msg.id, senderId: msg.sender_id });
+
       if (window.location.pathname === `/chat/${msg.sender_id}`) return;
       const defaultTone = localStorage.getItem('chatverse_default_tone') || 'ringtone1';
-      new Audio(`/sounds/${defaultTone}.mp3`).play().catch(() => {}); // Safety catch
+      new Audio(`/sounds/${defaultTone}.mp3`).play().catch(() => {}); 
     });
 
     // FIX 4: Optimized Push Subscription (No API Spam)
@@ -168,8 +171,8 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/home" />} />
           <Route path="/home" element={<HomeFeed />} />
-          <Route path="/chats" element={<ChatList />} />
-          <Route path="/chat/:id" element={<ChatScreen />} />
+          <Route path="/chats" element={<ChatList socket={globalSocket} />} />
+          <Route path="/chat/:id" element={<ChatScreen socket={globalSocket} />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />

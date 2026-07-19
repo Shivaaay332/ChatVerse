@@ -619,6 +619,16 @@ io.on('connection', (socket) => {
     } catch (err) { console.error("Mark as read error:", err); }
   });
 
+  // ✅ NAYA CODE: Frontend se Delivery Acknowledgement sunne ke liye
+  socket.on('message_delivered', async ({ messageId, senderId }) => {
+    try {
+      await db.query(`UPDATE messages SET status = 'delivered' WHERE id = $1`, [messageId]);
+      io.to(senderId).emit('message_updated', { id: messageId, status: 'delivered' });
+    } catch (err) { 
+      console.error("Delivery status error:", err); 
+    }
+  });
+
   socket.on('mark_chat_read', async ({ senderId, receiverId }) => {
     try {
       await db.query(`UPDATE messages SET status = 'read' WHERE sender_id = $1 AND receiver_id = $2 AND status != 'read'`, [senderId, receiverId]);
