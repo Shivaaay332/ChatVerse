@@ -11,11 +11,24 @@ const nodemailer = require('nodemailer'); // ✅ NAYA: Email bhejne ke liye
 require('dotenv').config();
 
 // ✅ NAYA: Nodemailer Setup (Ise apni .env file me EMAIL_USER aur EMAIL_PASS daal kar use karna, Password normal nahi "App Password" hona chahiye Gmail se)
+// ✅ FIX: Official Secure Gmail SMTP Configuration
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // 465 port ke liye true hona zaroori hai
   auth: {
-    user: process.env.EMAIL_USER || 'your_email@gmail.com', 
-    pass: process.env.EMAIL_PASS || 'your_app_password' 
+    user: process.env.EMAIL_USER, 
+    pass: process.env.EMAIL_PASS 
+  }
+});
+
+// Server start hote hi check karega ki Email details sahi hain ya nahi
+transporter.verify((error, success) => {
+  if (error) {
+    console.log("❌ Email configuration error. Check your .env file details!");
+    console.error(error);
+  } else {
+    console.log("✅ Nodemailer is Ready to send OTPs!");
   }
 });
 
@@ -143,16 +156,26 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
     await db.query(`UPDATE users SET reset_otp = $1, reset_otp_expiry = $2 WHERE email = $3`, [otp, expiry, email]);
 
-    // ✅ FIX: 'await' hata diya hai taaki email background mein jaye aur frontend ko wait na karna pade
-    transporter.sendMail({
-      from: process.env.EMAIL_USER || 'your_email@gmail.com',
-      to: email,
-      subject: 'ChatVerse - Password Reset OTP',
-      html: `<h2>Your OTP is: <b style="color: #4f46e5;">${otp}</b></h2><p>This OTP is valid for 10 minutes. Do not share it with anyone.</p>`
-    }).catch(err => console.error("Background Email Error:", err)); // Agar email fail hua toh server log me dikhega par app hang nahi hogi
+    // ✅ FIX: Await wapas lagaya aur error properly frontend par bheja
+    try {
+      await transporter.sendMail({
+        from: `"ChatVerse Security" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'ChatVerse - Password Reset OTP',
+        html: `<div style="font-family: sans-serif; padding: 20px;">
+                 <h2>Password Reset Request</h2>
+                 <p>Your ChatVerse OTP is:</p>
+                 <h1 style="color: #4f46e5; letter-spacing: 5px;">${otp}</h1>
+                 <p>This OTP is valid for 10 minutes. Do not share it with anyone.</p>
+               </div>`
+      });
+      
+      res.status(200).json({ message: 'OTP sent successfully!' });
+    } catch (emailErr) {
+      console.error("❌ Email Sending Failed:", emailErr);
+      return res.status(500).json({ error: 'Failed to send OTP email. Please try again later.' });
+    }
 
-    // Frontend ko turant response mil jayega
-    res.status(200).json({ message: 'OTP sent successfully!' });
   } catch (err) { 
     console.error(err);
     res.status(500).json({ error: 'Failed to send OTP.' }); 
