@@ -13,6 +13,11 @@ export default function AuthScreen({ onLogin }) {
   const [isLoading, setIsLoading] = useState(false);
   const [valErrors, setValErrors] = useState({});
 
+  // ✅ NAYA: Forgot Password ke states
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [otpStep, setOtpStep] = useState(1); 
+  const [resetData, setResetData] = useState({ email: '', otp: '', newPassword: '' });
+
   const handleUniqueIdChange = (e) => {
     const sanitized = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
     setFormData({ ...formData, unique_id: sanitized });
@@ -70,6 +75,38 @@ export default function AuthScreen({ onLogin }) {
     setIsLogin(!isLogin);
     setError('');
     setValErrors({});
+    setIsForgotPassword(false);
+    setOtpStep(1);
+  };
+
+  // ✅ NAYA: OTP bhejne ka function
+  const handleRequestOTP = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetData.email)) { setError('Enter a valid email.'); return; }
+    setIsLoading(true);
+    try {
+      await api.post('/auth/forgot-password', { email: resetData.email });
+      setOtpStep(2);
+    } catch (err) { setError(err.response?.data?.error || 'Failed to send OTP.'); }
+    setIsLoading(false);
+  };
+
+  // ✅ NAYA: Naya password save karne ka function
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (resetData.otp.length !== 4) { setError('Enter 4-digit OTP.'); return; }
+    if (resetData.newPassword.length < 6) { setError('Password must be at least 6 chars.'); return; }
+    setIsLoading(true);
+    try {
+      await api.post('/auth/reset-password', resetData);
+      alert("Password reset successfully! Please log in.");
+      setIsForgotPassword(false);
+      setOtpStep(1);
+      setIsLogin(true);
+    } catch (err) { setError(err.response?.data?.error || 'Failed to reset password.'); }
+    setIsLoading(false);
   };
 
   return (
@@ -89,6 +126,43 @@ export default function AuthScreen({ onLogin }) {
       </div>
 
       {/* FORM SECTION */}
+      {isForgotPassword ? (
+        <form onSubmit={otpStep === 1 ? handleRequestOTP : handleResetPassword} className="flex-1 px-6 flex flex-col gap-4 pb-12 animate-slide-up">
+          <div className="text-center mb-2">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Recover Password</h2>
+            <p className="text-[13px] text-gray-500 mt-1">{otpStep === 1 ? 'Enter email to receive OTP' : 'Check your email for the 4-digit OTP'}</p>
+          </div>
+
+          {error && <div className="bg-red-50 dark:bg-red-900/30 text-red-500 border border-red-200 dark:border-red-800 text-[13px] font-bold px-4 py-3 rounded-2xl text-center">{error}</div>}
+
+          <div className="flex flex-col gap-1">
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input type="email" value={resetData.email} onChange={(e) => setResetData({...resetData, email: e.target.value})} disabled={otpStep === 2} placeholder="Registered Email Address" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white px-12 py-3.5 rounded-2xl outline-none focus:border-chatverse font-semibold" />
+            </div>
+          </div>
+
+          {otpStep === 2 && (
+            <>
+              <div className="flex flex-col gap-1">
+                <input type="text" maxLength="4" value={resetData.otp} onChange={(e) => setResetData({...resetData, otp: e.target.value})} placeholder="4-Digit OTP" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white px-5 py-3.5 rounded-2xl outline-none focus:border-chatverse text-center font-black tracking-widest text-lg" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input type="password" value={resetData.newPassword} onChange={(e) => setResetData({...resetData, newPassword: e.target.value})} placeholder="New Password" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white pl-12 py-3.5 rounded-2xl outline-none focus:border-chatverse font-semibold" />
+                </div>
+              </div>
+            </>
+          )}
+
+          <button type="submit" disabled={isLoading} className={`mt-2 w-full text-white font-black py-4 rounded-2xl transition-all shadow-xl shadow-indigo-500/20 ${isLoading ? 'bg-indigo-400 scale-[0.98]' : 'bg-chatverse hover:bg-indigo-700 active:scale-[0.98]'}`}>
+            {isLoading ? <Loader className="w-5 h-5 animate-spin mx-auto" /> : (otpStep === 1 ? 'Send OTP' : 'Reset Password')}
+          </button>
+
+          <button type="button" onClick={() => {setIsForgotPassword(false); setOtpStep(1); setError('');}} className="text-gray-500 font-bold text-[14px] hover:underline mt-2">Back to Login</button>
+        </form>
+      ) : (
       <form onSubmit={handleSubmit} className="flex-1 px-6 flex flex-col gap-4 pb-12">
         
         {error && (
@@ -189,6 +263,15 @@ export default function AuthScreen({ onLogin }) {
           </div>
         )}
 
+        {/* ✅ NAYA: Forgot Password Link (Sirf Login tab me dikhega) */}
+        {isLogin && (
+          <div className="flex justify-end pr-1 -mt-1">
+            <button type="button" onClick={() => setIsForgotPassword(true)} className="text-chatverse dark:text-indigo-400 font-bold text-[13px] hover:underline">
+              Forgot Password?
+            </button>
+          </div>
+        )}
+
         <button 
           type="submit" 
           disabled={isLoading}
@@ -212,6 +295,8 @@ export default function AuthScreen({ onLogin }) {
         </div>
         
       </form>
+      )}
+      )&rbrace;
     </div>
   );
 }

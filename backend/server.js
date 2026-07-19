@@ -7,7 +7,17 @@ const jwt = require('jsonwebtoken');
 const { types } = require('pg'); 
 const db = require('./db');
 const webpush = require('web-push'); // <-- NAYA PUSH PACKAGE ADD KIYA HAI
+const nodemailer = require('nodemailer'); // ✅ NAYA: Email bhejne ke liye
 require('dotenv').config();
+
+// ✅ NAYA: Nodemailer Setup (Ise apni .env file me EMAIL_USER aur EMAIL_PASS daal kar use karna, Password normal nahi "App Password" hona chahiye Gmail se)
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER || 'your_email@gmail.com', 
+    pass: process.env.EMAIL_PASS || 'your_app_password' 
+  }
+});
 
 // FIX: Secure JWT Fallback Logic
 const JWT_SECRET_KEY = process.env.JWT_SECRET;
@@ -64,6 +74,10 @@ const initializeDatabase = async () => {
     // FIX: NAYA COLUMN BACKGROUND PUSH KE LIYE
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS push_subscription JSON;`);
     
+    // ✅ NAYA: Forgot Password OTP Columns
+    await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp TEXT;`);
+    await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp_expiry TIMESTAMP;`);
+    
     console.log("✅ Database Tables Auto-Synced! Verified & Privacy Columns Active. Web Push Ready!");
   } catch (err) { console.error("❌ DB Auto-Fix Error:", err); }
 };
@@ -115,6 +129,49 @@ app.post('/api/auth/login', async (req, res) => {
     const token = jwt.sign({ id: user.rows[0].unique_id }, ACTIVE_JWT_SECRET, { expiresIn: '7d' });
     res.status(200).json({ message: 'Login successful!', token, user: { unique_id: user.rows[0].unique_id, username: user.rows[0].username, bio: user.rows[0].bio, is_verified: user.rows[0].is_verified } });
   } catch (err) { res.status(500).json({ error: 'Error during login' }); }
+});
+
+// ✅ NAYA CODE: Forgot Password OTP Generation
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (user.rows.length === 0) return res.status(404).json({ error: 'Email not registered!' });
+
+    const otp = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
+    const expiry = new Date(Date.now() + 10 * 60000); // 10 minutes expiry
+
+    await db.query(`UPDATE users SET reset_otp = $1, reset_otp_expiry = $2 WHERE email = $3`, [otp, expiry, email]);
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER || 'your_email@gmail.com',
+      to: email,
+      subject: 'ChatVerse - Password Reset OTP',
+      html: `<h2>Your OTP is: <b style="color: #4f46e5;">${otp}</b></h2><p>This OTP is valid for 10 minutes. Do not share it with anyone.</p>`
+    });
+
+    res.status(200).json({ message: 'OTP sent successfully!' });
+  } catch (err) { 
+    console.error(err);
+    res.status(500).json({ error: 'Failed to send OTP.' }); 
+  }
+});
+
+// ✅ NAYA CODE: Verify OTP & Reset Password
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    const user = await db.query('SELECT reset_otp, reset_otp_expiry FROM users WHERE email = $1', [email]);
+    
+    if (user.rows.length === 0) return res.status(404).json({ error: 'User not found!' });
+    if (user.rows[0].reset_otp !== otp) return res.status(400).json({ error: 'Invalid OTP!' });
+    if (new Date() > new Date(user.rows[0].reset_otp_expiry)) return res.status(400).json({ error: 'OTP has expired!' });
+
+    const password_hash = await bcrypt.hash(newPassword, await bcrypt.genSalt(10));
+    await db.query(`UPDATE users SET password_hash = $1, reset_otp = NULL, reset_otp_expiry = NULL WHERE email = $2`, [password_hash, email]);
+
+    res.status(200).json({ message: 'Password reset successful!' });
+  } catch (err) { res.status(500).json({ error: 'Failed to reset password.' }); }
 });
 
 // --- USER APIs ---
