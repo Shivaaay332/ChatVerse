@@ -128,7 +128,12 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
       if (unreads.length > 0) setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
       setMessages(fetchedMessages);
 
-      setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'auto' }), 100);
+      // ✅ FIX: Race Condition Solved! React ko screen par saare messages draw karne ke liye 150ms ka time diya, uske baad forcefully 'instant' scroll kiya taaki bina hang hue seedha Last Message dikhe.
+      setTimeout(() => {
+        if (endOfMessagesRef.current) {
+          endOfMessagesRef.current.scrollIntoView({ behavior: 'instant', block: 'end' });
+        }
+      }, 150); 
 
       if (!hideReadReceiptsRef.current && unreads.length > 0) {
         setMessages(prev => prev.map(m => (m.sender_id === receiverId && m.status !== 'read') ? { ...m, status: 'read' } : m));
@@ -308,12 +313,17 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
   const handleTyping = useCallback((e) => {
     setMessage(e.target.value);
     const target = e.target;
+    
+    // ✅ FIX 1: Vibration roki! Ab screen har letter par scroll nahi hogi, sirf tab hogi jab chat ki nai line (height) sach me badhegi.
     window.requestAnimationFrame(() => {
+      const currentHeight = target.style.height;
       target.style.height = 'auto';
-      // ✅ FIX 3: Textarea ki height cap ki aur resize hone par chat ko niche scroll kiya
-      const newHeight = Math.min(target.scrollHeight, 120); 
+      const newHeight = Math.min(target.scrollHeight, 120);
       target.style.height = `${newHeight}px`;
-      endOfMessagesRef.current?.scrollIntoView({ behavior: 'instant' });
+      
+      if (currentHeight !== `${newHeight}px`) {
+        endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
     });
 
     if (socket && !hasCustomPrivacy && !hideOnline) {
@@ -952,7 +962,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
       )}
 
       <div 
-        className="flex-1 overflow-y-auto no-scrollbar px-4 pt-4 pb-2 relative"
+        // ✅ FIX 4: 'overscroll-none' lagaya taaki chat ko zor se khichne par browser elastic bounce na kare aur background white space na dikhe
+        className="flex-1 overflow-y-auto overscroll-none no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
       >
         {/* ✅ FIX (Bug 3): "No Results Found" ka clear message */}
@@ -1036,8 +1047,14 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
               value={message} onChange={handleTyping} placeholder="Message..." 
               className="flex-1 max-h-28 overflow-y-auto no-scrollbar bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400 shadow-sm" 
               rows="1" 
-              // ✅ FIX 3: Keyboard native open hone par smooth scroll taaki latest message dikhe
-              onFocus={() => setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 300)}
+              // ✅ FIX 3: White screen flash hataya! 400ms ka smart delay taaki keyboard pura slide-up ho jaye, uske baad gently smooth scroll ho.
+              onFocus={() => {
+                setTimeout(() => {
+                  window.requestAnimationFrame(() => {
+                    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                  });
+                }, 400); 
+              }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
             />
             <button 
