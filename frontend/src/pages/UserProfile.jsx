@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, UserPlus, MessageSquare, Grid, Check, Loader, UserCheck, MoreVertical, Star, BellOff, Shield, Ban, UserMinus, ChevronRight, BadgeCheck } from 'lucide-react';
+import { ArrowLeft, UserPlus, MessageSquare, Grid, Check, Loader, UserCheck, MoreVertical, BellOff, Shield, Ban, UserMinus, ChevronRight, BadgeCheck } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import api from '../api';
@@ -23,8 +23,6 @@ export default function UserProfile() {
   const [showMenu, setShowMenu] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null); 
   const [isMuted, setIsMuted] = useState(localStorage.getItem(`cv_mute_${user.unique_id}`) === 'true');
-  const [isFavorite, setIsFavorite] = useState(localStorage.getItem(`cv_fav_${user.unique_id}`) === 'true');
-  const [customPrivacy, setCustomPrivacy] = useState(localStorage.getItem(`cv_privacy_${user.unique_id}`) === 'true');
 
   useEffect(() => {
     if (!user.unique_id) { navigate('/chats'); return; }
@@ -154,22 +152,6 @@ export default function UserProfile() {
     setShowMenu(false);
   };
 
-  const toggleFavorite = () => {
-    const newValue = !isFavorite;
-    setIsFavorite(newValue);
-    localStorage.setItem(`cv_fav_${user.unique_id}`, newValue);
-    window.dispatchEvent(new Event('chatverse_settings_updated')); // FIX: Global Event for ChatList
-    setShowMenu(false);
-  };
-
-  const toggleCustomPrivacy = () => {
-    const newValue = !customPrivacy;
-    setCustomPrivacy(newValue);
-    localStorage.setItem(`cv_privacy_${user.unique_id}`, newValue);
-    window.dispatchEvent(new Event('chatverse_settings_updated')); // FIX: Global Event
-    setShowMenu(false);
-  };
-
   return (
     <div className="h-full w-full bg-gray-50 dark:bg-gray-900 flex flex-col relative transition-colors">
       
@@ -192,17 +174,9 @@ export default function UserProfile() {
             
             {showMenu && (
               <div className="absolute right-0 top-12 w-56 bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-40 animate-slide-up">
-                <button onClick={toggleFavorite} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors">
-                  <Star className={`w-[18px] h-[18px] ${isFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} /> 
-                  {isFavorite ? 'Remove from Favorites' : 'Mark as Favorite'}
-                </button>
-                <button onClick={toggleMute} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors border-t border-gray-50 dark:border-gray-700/50">
+                <button onClick={toggleMute} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors">
                   <BellOff className={`w-[18px] h-[18px] ${isMuted ? 'text-red-400' : ''}`} /> 
                   {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
-                </button>
-                <button onClick={toggleCustomPrivacy} className="w-full text-left px-4 py-3.5 text-[14px] text-gray-800 dark:text-gray-200 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700 font-semibold transition-colors border-t border-gray-50 dark:border-gray-700/50">
-                  <Shield className={`w-[18px] h-[18px] ${customPrivacy ? 'text-green-500' : ''}`} /> 
-                  {customPrivacy ? 'Disable Custom Privacy' : 'Enable Custom Privacy'}
                 </button>
                 <button onClick={handleBlock} className="w-full text-left px-4 py-3.5 text-[14px] text-red-500 flex items-center gap-3 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors border-t border-gray-100 dark:border-gray-700/80">
                   <Ban className="w-[18px] h-[18px]" /> Block User
@@ -218,11 +192,6 @@ export default function UserProfile() {
           <div className="w-full h-full bg-white dark:bg-gray-900 rounded-full flex items-center justify-center uppercase">
             <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-tr from-chatverse to-purple-500">{user.username?.charAt(0) || '?'}</span>
           </div>
-          {isFavorite && !isMe && (
-            <div className="absolute -bottom-1 -right-1 bg-yellow-400 p-1.5 rounded-full border-2 border-white dark:border-gray-800 shadow-sm">
-              <Star className="w-3.5 h-3.5 text-white fill-white" />
-            </div>
-          )}
         </div>
         
         <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight flex items-center gap-2">

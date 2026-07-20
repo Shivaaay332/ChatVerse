@@ -287,6 +287,49 @@ app.put('/api/users/me/bio', authenticateToken, async (req, res) => {
   try { await db.query(`UPDATE users SET bio = $1 WHERE unique_id = $2`, [req.body.bio, req.user.id]); res.status(200).json({ message: 'Bio updated' }); } catch (err) { res.status(500).json({ error: 'Error updating bio' }); }
 });
 
+app.put('/api/users/me/profile', authenticateToken, async (req, res) => {
+  try {
+    const { username, email, bio, oldPassword, newPassword } = req.body;
+
+    // FIX: Convert empty strings to null so COALESCE works properly and keeps old data
+    const finalUsername = username?.trim() || null;
+    const finalEmail = email?.trim() || null;
+    const finalBio = bio !== undefined ? bio : null;
+    
+    // 1. Check if new email is already taken by someone else
+    if (finalEmail) {
+      const emailCheck = await db.query('SELECT unique_id FROM users WHERE email = $1 AND unique_id != $2', [finalEmail, req.user.id]);
+      if (emailCheck.rows.length > 0) return res.status(400).json({ error: 'Email is already in use by another account!' });
+    }
+
+    let query = 'UPDATE users SET username = COALESCE($1, username), email = COALESCE($2, email), bio = COALESCE($3, bio)';
+    let values = [finalUsername, finalEmail, finalBio];
+    let paramIndex = 4;
+
+    // 2. Handle Password Update securely
+    if (oldPassword && newPassword) {
+      const user = await db.query('SELECT password_hash FROM users WHERE unique_id = $1', [req.user.id]);
+      const validPassword = await bcrypt.compare(oldPassword, user.rows[0].password_hash);
+      if (!validPassword) return res.status(400).json({ error: 'Incorrect old password!' });
+      
+      const hashedNewPassword = await bcrypt.hash(newPassword, await bcrypt.genSalt(10));
+      query += `, password_hash = $${paramIndex}`;
+      values.push(hashedNewPassword);
+      paramIndex++;
+    }
+
+    query += ` WHERE unique_id = $${paramIndex} RETURNING unique_id, username, bio, is_verified, email`;
+    values.push(req.user.id);
+
+    const updatedUser = await db.query(query, values);
+    res.status(200).json({ message: 'Profile updated successfully!', user: updatedUser.rows[0] });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update profile.' });
+  }
+});
+
 app.put('/api/users/me/verify', authenticateToken, async (req, res) => {
   try {
     await db.query(`UPDATE users SET is_verified = TRUE WHERE unique_id = $1`, [req.user.id]);
@@ -294,25 +337,23 @@ app.put('/api/users/me/verify', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error verifying account' }); }
 });
 
-app.put('/api/users/me/privacy', authenticateToken, async (req, res) => {
+// NAYA GET ROUTE: Frontend ko current privacy settings bhejne ke liye
+app.get('/api/users/me/privacy', authenticateToken, async (req, res) => {
   try {
-    if (req.body.hideLastSeen !== undefined) {
-      await db.query(`UPDATE users SET hide_last_seen = $1 WHERE unique_id = $2`, [req.body.hideLastSeen, req.user.id]);
-    }
-    if (req.body.hideOnlineStatus !== undefined) {
-      await db.query(`UPDATE users SET hide_online_status = $1 WHERE unique_id = $2`, [req.body.hideOnlineStatus, req.user.id]);
-      
-      // Instantly push offline status globally if hidden
-      if (req.body.hideOnlineStatus === true) {
-         io.emit('user_offline', { userId: req.user.id, lastSeen: new Date().toISOString() });
-      } else {
-         if (onlineUsers.has(req.user.id)) {
-            io.emit('user_online', req.user.id);
-         }
-      }
-    }
-    res.status(200).json({ message: 'Privacy updated' });
-  } catch (err) { res.status(500).json({ error: 'Error updating privacy' }); }
+    const user = await db.query(
+      'SELECT hide_last_seen, hide_online_status FROM users WHERE unique_id = $1', 
+      [req.user.id]
+    );
+    if (user.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    res.status(200).json({
+      hideLastSeen: user.rows[0].hide_last_seen,
+      hideOnlineStatus: user.rows[0].hide_online_status
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error fetching privacy settings' });
+  }
 });
 
 app.delete('/api/users/me', authenticateToken, async (req, res) => {

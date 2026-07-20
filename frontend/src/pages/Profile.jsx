@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Edit3, Grid, Loader, Check, X, ChevronRight, BadgeCheck } from 'lucide-react';
+import { ArrowLeft, Edit3, Grid, Loader, Check, X, ChevronRight, BadgeCheck, User, Mail, Lock, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav'; 
 import api from '../api'; 
@@ -10,10 +10,20 @@ export default function Profile() {
   const [myPosts, setMyPosts] = useState([]);
   const [friendCount, setFriendCount] = useState(0); 
   const [loading, setLoading] = useState(true);
-  const [isEditingBio, setIsEditingBio] = useState(false);
-  
   const [userProfile, setUserProfile] = useState(JSON.parse(localStorage.getItem('chatverse_user')) || {});
-  const [bioText, setBioText] = useState(userProfile.bio || "Available on ChatVerse ✨");
+  
+  // Naye Edit Profile States
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editForm, setEditForm] = useState({
+    username: userProfile.username || '',
+    email: userProfile.email || '', // Ensure your local storage has email, or user will type it
+    bio: userProfile.bio || '',
+    oldPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
 
   const [selectedPost, setSelectedPost] = useState(null);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
@@ -48,6 +58,46 @@ export default function Profile() {
   };
   const removeLocalPost = (id) => {
     setMyPosts(myPosts.filter(p => p.id !== id));
+  };
+
+  const handleUpdateProfile = async (e) => {
+    e.preventDefault();
+    setEditError('');
+
+    // Validations
+    if (!editForm.username.trim()) return setEditError("Name cannot be empty.");
+    if (editForm.newPassword || editForm.oldPassword) {
+      if (!editForm.oldPassword) return setEditError("Enter old password to change it.");
+      if (editForm.newPassword.length < 6) return setEditError("New password must be at least 6 characters.");
+      if (editForm.newPassword !== editForm.confirmPassword) return setEditError("New passwords do not match.");
+    }
+
+    setEditLoading(true);
+    try {
+      const res = await api.put('/users/me/profile', {
+        username: editForm.username,
+        email: editForm.email,
+        bio: editForm.bio,
+        oldPassword: editForm.oldPassword,
+        newPassword: editForm.newPassword
+      });
+
+      // Update LocalStorage & UI State
+      const updatedUser = { ...userProfile, ...res.data.user };
+      localStorage.setItem('chatverse_user', JSON.stringify(updatedUser));
+      setUserProfile(updatedUser);
+      
+      alert("Profile updated successfully!");
+      setShowEditModal(false); // Modal close karein
+      
+      // Clear password fields for safety
+      setEditForm({ ...editForm, oldPassword: '', newPassword: '', confirmPassword: '' });
+      
+    } catch (err) {
+      setEditError(err.response?.data?.error || "Failed to update profile.");
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const handleOpenFriends = async () => {
@@ -94,24 +144,16 @@ export default function Profile() {
             <p className="text-[13px] text-chatverse dark:text-indigo-400 font-bold mt-0.5">@{userProfile.unique_id}</p>
           </div>
 
-          <div className="mt-3 w-full flex flex-col items-center">
-            {isEditingBio ? (
-              <div className="w-full max-w-[260px] flex items-center gap-2 bg-gray-50 dark:bg-gray-700 p-1 rounded-xl border border-gray-200 dark:border-gray-600 shadow-inner">
-                <input 
-                  type="text" value={bioText} onChange={(e) => setBioText(e.target.value)} 
-                  className="flex-1 bg-transparent dark:text-white text-[13px] focus:outline-none text-center font-medium pl-2" autoFocus maxLength={50} 
-                />
-                <button onClick={handleSaveBio} className="p-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"><Check className="w-3.5 h-3.5"/></button>
-                <button onClick={() => {setIsEditingBio(false); setBioText(userProfile.bio || "");}} className="p-1 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"><X className="w-3.5 h-3.5"/></button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingBio(true)}>
-                <p className="text-[13px] text-gray-600 dark:text-gray-300 font-medium whitespace-pre-wrap text-center max-w-[260px] leading-snug">
-                  {userProfile.bio || "Add a bio to your profile ✨"}
-                </p>
-                <Edit3 className="w-[12px] h-[12px] text-gray-300 dark:text-gray-500 group-hover:text-chatverse transition-colors" />
-              </div>
-            )}
+          <div className="mt-3 w-full flex flex-col items-center gap-3">
+            <p className="text-[14px] text-gray-600 dark:text-gray-300 font-medium whitespace-pre-wrap text-center max-w-[280px] leading-snug">
+               {userProfile.bio || "Add a bio to your profile ✨"}
+            </p>
+            <button 
+              onClick={() => setShowEditModal(true)}
+              className="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 text-[13px] font-bold px-5 py-2 rounded-full transition-colors flex items-center gap-2 border border-gray-200 dark:border-gray-600"
+            >
+              <Edit3 className="w-4 h-4" /> Edit Profile
+            </button>
           </div>
           
           <div className="flex w-full max-w-[260px] justify-between mt-5 bg-gray-50 dark:bg-gray-700/50 p-3 rounded-[16px] border border-gray-100 dark:border-gray-700 shadow-sm">
@@ -219,6 +261,70 @@ export default function Profile() {
                  ))}
                </div>
              )}
+          </div>
+        </div>
+      )}
+
+      {/* EDIT PROFILE MODAL */}
+      {showEditModal && (
+        <div className="absolute inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-fade-in" onClick={() => setShowEditModal(false)}>
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-[24px] shadow-2xl animate-slide-up flex flex-col overflow-hidden max-h-[85vh]" onClick={e => e.stopPropagation()}>
+            
+            <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
+              <h3 className="font-black text-lg text-gray-900 dark:text-white flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-chatverse" /> Edit Profile
+              </h3>
+              <button onClick={() => setShowEditModal(false)} className="p-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full hover:bg-gray-200 transition-colors"><X className="w-5 h-5"/></button>
+            </div>
+
+            <form onSubmit={handleUpdateProfile} className="flex-1 overflow-y-auto no-scrollbar p-5 flex flex-col gap-4">
+              {editError && <div className="bg-red-50 dark:bg-red-900/30 text-red-500 text-[13px] font-bold px-3 py-2 rounded-xl text-center">{editError}</div>}
+
+              {/* Basic Details */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider ml-1">Full Name</label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input type="text" value={editForm.username} onChange={(e) => setEditForm({...editForm, username: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white pl-10 pr-4 py-3 rounded-xl outline-none focus:border-chatverse font-semibold text-[14px]" />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider ml-1">Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input type="email" value={editForm.email} onChange={(e) => setEditForm({...editForm, email: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white pl-10 pr-4 py-3 rounded-xl outline-none focus:border-chatverse font-semibold text-[14px]" placeholder="Update your email..." />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider ml-1">Bio</label>
+                <textarea rows="2" value={editForm.bio} onChange={(e) => setEditForm({...editForm, bio: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white px-4 py-3 rounded-xl outline-none focus:border-chatverse font-medium text-[14px] resize-none" placeholder="Write something about yourself..." />
+              </div>
+
+              {/* Password Change Section (Optional) */}
+              <div className="mt-2 pt-4 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-4">
+                <h4 className="text-[13px] font-black text-gray-900 dark:text-white">Change Password <span className="text-gray-400 font-medium">(Leave blank to keep current)</span></h4>
+                
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input type="password" placeholder="Current Password" value={editForm.oldPassword} onChange={(e) => setEditForm({...editForm, oldPassword: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white pl-10 pr-4 py-3 rounded-xl outline-none focus:border-chatverse text-[14px]" />
+                  </div>
+                  <div className="flex gap-2">
+                    <input type="password" placeholder="New Password" value={editForm.newPassword} onChange={(e) => setEditForm({...editForm, newPassword: e.target.value})} className="w-1/2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white px-4 py-3 rounded-xl outline-none focus:border-chatverse text-[14px]" />
+                    <input type="password" placeholder="Confirm New" value={editForm.confirmPassword} onChange={(e) => setEditForm({...editForm, confirmPassword: e.target.value})} className="w-1/2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white px-4 py-3 rounded-xl outline-none focus:border-chatverse text-[14px]" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 pt-3 pb-1 bg-white dark:bg-gray-800 mt-2 border-t border-gray-50 dark:border-gray-700">
+                <button type="submit" disabled={editLoading} className="w-full bg-chatverse text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md">
+                  {editLoading ? <Loader className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5" /> Save Changes</>}
+                </button>
+              </div>
+
+            </form>
           </div>
         </div>
       )}
