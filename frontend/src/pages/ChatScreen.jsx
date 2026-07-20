@@ -23,32 +23,6 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
   // FIX: Socket reconnect rokne ke liye isMuted ko ref me store kiya
   const isMutedRef = useRef(isMuted);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
-  // ✅ FIX 1: Mobile me keyboard aate hi Double Push ko roko
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 640) {
-        setViewportHeight('100%');
-      } else {
-        if (window.visualViewport) {
-          setViewportHeight(`${window.visualViewport.height}px`);
-          // ✅ FIX: Screen shrink hone ke baad agar browser page ko upar dhakele, toh use wapas '0' par lock kardo (Header bacha rahega)
-          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-          document.body.scrollTop = 0; 
-        } else {
-          setViewportHeight(`${window.innerHeight}px`);
-        }
-      }
-      setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'instant' }), 50);
-    };
-    
-    window.visualViewport?.addEventListener('resize', handleResize);
-    window.addEventListener('resize', handleResize);
-    handleResize(); 
-    return () => {
-      window.visualViewport?.removeEventListener('resize', handleResize);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
 
   const [chatTheme, setChatTheme] = useState(localStorage.getItem(`cv_theme_${receiverId}`) || 'default');
   const [showThemeModal, setShowThemeModal] = useState(false);
