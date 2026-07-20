@@ -759,8 +759,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   return (
     <div 
-      // ✅ FIX 2: CSS ko pura control de diya. 'absolute inset-0' App.jsx ke frame me fix rakhega aur browser auto-shrink karega.
-      className={`absolute inset-0 w-full h-full flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y z-10 ${getThemeClasses()}`} 
+      // ✅ MASTER FIX: 'fixed' aur 'h-[100dvh]' ka combo use kiya hai. '100dvh' directly keyboard ke aane-jane par screen ko shrink karega, aur 'fixed' body ko upar khisakne (White Gap) se rokega.
+      className={`fixed inset-0 w-full h-[100dvh] flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y z-50 ${getThemeClasses()}`} 
       onClick={handleScreenClick}
     >
 
@@ -1055,6 +1055,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
                   });
                 }, 400); 
               }}
+              // ✅ MASTER FIX 2: Jab keyboard band ho (blur ho), toh browser ko strictly bol do ki screen wapas 0 par laye, taaki kabhi White Gap na bache.
+              onBlur={() => window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
             />
             <button 
