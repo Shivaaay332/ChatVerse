@@ -128,11 +128,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
       if (unreads.length > 0) setInitialUnread({ count: unreads.length, firstId: unreads[0].id });
       setMessages(fetchedMessages);
 
-      // ✅ FIX: Race Condition Solved! React ko screen par saare messages draw karne ke liye 150ms ka time diya, uske baad forcefully 'instant' scroll kiya taaki bina hang hue seedha Last Message dikhe.
+      // ✅ MASTER FIX 4: Initial load par bhi window-level scroll roko, aur sirf chat box ko bottom par set karo. Ek fraction of second me Last message dhikhega bina header hile.
       setTimeout(() => {
-        if (endOfMessagesRef.current) {
-          endOfMessagesRef.current.scrollIntoView({ behavior: 'instant', block: 'end' });
-        }
+        const scrollBox = document.getElementById('chat-scroll-container');
+        if (scrollBox) scrollBox.scrollTop = scrollBox.scrollHeight;
       }, 150); 
 
       if (!hideReadReceiptsRef.current && unreads.length > 0) {
@@ -320,9 +319,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
       target.style.height = 'auto';
       const newHeight = Math.min(target.scrollHeight, 120);
       target.style.height = `${newHeight}px`;
-      
+          
       if (currentHeight !== `${newHeight}px`) {
-        endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        const scrollBox = document.getElementById('chat-scroll-container');
+        if (scrollBox) scrollBox.scrollTo({ top: scrollBox.scrollHeight, behavior: 'smooth' });
       }
     });
 
@@ -759,8 +759,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   return (
     <div 
-      // ✅ MASTER FIX: 'fixed' aur 'h-[100dvh]' ka combo use kiya hai. '100dvh' directly keyboard ke aane-jane par screen ko shrink karega, aur 'fixed' body ko upar khisakne (White Gap) se rokega.
-      className={`fixed inset-0 w-full h-[100dvh] flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y z-50 ${getThemeClasses()}`} 
+      // ✅ DESKTOP & MOBILE HYBRID FIX: 
+      // Mobile ke liye 'fixed' aur 'h-[100dvh]' rakha hai (keyboard issues rokne ke liye).
+      // Desktop (sm:) ke liye 'sm:absolute', 'sm:inset-0' aur 'sm:h-full' lagaya hai taaki ye App.jsx ke 400px frame ko na tode.
+      className={`fixed inset-0 sm:absolute sm:inset-0 w-full h-[100dvh] sm:h-full flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y z-50 ${getThemeClasses()}`} 
       onClick={handleScreenClick}
     >
 
@@ -962,7 +964,7 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
       )}
 
       <div 
-        // ✅ FIX 4: 'overscroll-none' lagaya taaki chat ko zor se khichne par browser elastic bounce na kare aur background white space na dikhe
+        id="chat-scroll-container" // ✅ MASTER FIX 1: Is container ko ID di taaki OS-level scroll (scrollIntoView) ki jagah isko manually andar hi andar scroll kar sakein.
         className="flex-1 overflow-y-auto overscroll-none no-scrollbar px-4 pt-4 pb-2 relative"
         onScroll={handleScroll}
       >
@@ -1047,16 +1049,15 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
               value={message} onChange={handleTyping} placeholder="Message..." 
               className="flex-1 max-h-28 overflow-y-auto no-scrollbar bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400 shadow-sm" 
               rows="1" 
-              // ✅ FIX 3: White screen flash hataya! 400ms ka smart delay taaki keyboard pura slide-up ho jaye, uske baad gently smooth scroll ho.
+              // ✅ MASTER FIX 2: scrollIntoView hata diya! Ab sirf andar ka 'chat-scroll-container' scroll hoga. Sath hi window ko forcefully top (0,0) par lock kar diya taaki Header hawa me na ude.
               onFocus={() => {
                 setTimeout(() => {
-                  window.requestAnimationFrame(() => {
-                    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                  });
-                }, 400); 
+                  window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); 
+                  const scrollBox = document.getElementById('chat-scroll-container');
+                  if (scrollBox) scrollBox.scrollTo({ top: scrollBox.scrollHeight, behavior: 'smooth' });
+                }, 300); 
               }}
-              // ✅ MASTER FIX 2: Jab keyboard band ho (blur ho), toh browser ko strictly bol do ki screen wapas 0 par laye, taaki kabhi White Gap na bache.
-              onBlur={() => window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })}
+              onBlur={() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' })}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
             />
             <button 
