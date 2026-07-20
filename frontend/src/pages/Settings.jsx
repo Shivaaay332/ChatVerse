@@ -29,7 +29,10 @@ export default function Settings() {
   const [isUpdatingPrivacy, setIsUpdatingPrivacy] = useState(false);
 
   const [showToneModal, setShowToneModal] = useState(false);
-  const [pushEnabled, setPushEnabled] = useState(Notification.permission === 'granted');
+  // ✅ FIX 1: Safe check lagaya taaki unsupported browser me app crash na ho
+  const [pushEnabled, setPushEnabled] = useState(
+    typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  );
   const [previewTone, setPreviewTone] = useState('');
   
   const [showPinModal, setShowPinModal] = useState(false);
@@ -90,10 +93,14 @@ export default function Settings() {
 
   const handleFontSizeChange = (e) => {
     const val = parseInt(e.target.value);
+    // ✅ FIX 6: Safety check, agar value array ke bahar ho ya number na ho toh ruk jao
+    if (isNaN(val) || val < 0 || val > 2) return; 
+    
     setFontSizeIndex(val);
     localStorage.setItem('chatverse_fontsize', val);
     const sizes = ['14px', '16px', '18px'];
-    document.documentElement.style.fontSize = sizes[val];
+    // ✅ FIX 5: Fallback default value di gayi hai
+    document.documentElement.style.fontSize = sizes[val] || '16px'; 
   };
 
   // NEW FIX: Require PIN to disable App Lock
@@ -197,7 +204,7 @@ export default function Settings() {
     window.dispatchEvent(new Event('chatverse_logout_trigger'));
     localStorage.clear();
     document.documentElement.style.fontSize = '16px'; 
-    window.location.href = '/'; // Safe hard reload
+    navigate('/', { replace: true }); // ✅ FIX 4: React SPA navigation, bina jhatke (refresh) ke page change
   };
 
   const handleKeyPress = (num) => {
@@ -206,41 +213,46 @@ export default function Settings() {
 
   const handlePinDelete = () => { setPin((prev) => prev.slice(0, -1)); setPinError(false); };
 
+  // ✅ FIX 2 & 3: timeoutId banaya aur return() me usko clear kiya taaki memory leak aur loop na bane
   useEffect(() => {
+    let timeoutId;
     if (pin.length === 4) {
       if (step === 1) {
-        setTimeout(() => { if(isMountedRef.current) { setConfirmPin(pin); setPin(''); setStep(2); }}, 300);
+        timeoutId = setTimeout(() => { if(isMountedRef.current) { setConfirmPin(pin); setPin(''); setStep(2); }}, 300);
       } else if (step === 2) {
         if (pin === confirmPin) {
           localStorage.setItem('chatverse_pin', pin);
           localStorage.setItem('chatverse_applock', 'true');
           setAppLock(true);
           window.dispatchEvent(new Event('chatverse_applock_triggered'));
-          setTimeout(() => { if(isMountedRef.current) setShowPinModal(false); }, 300);
+          timeoutId = setTimeout(() => { if(isMountedRef.current) setShowPinModal(false); }, 300);
         } else {
           setPinError(true);
-          setTimeout(() => { 
+          timeoutId = setTimeout(() => { 
             if(isMountedRef.current) {
                setPin(''); 
-               setStep(1); // FIX: Reset to Step 1 to break the infinite loop
+               setStep(1); 
                setConfirmPin('');
             }
           }, 500);
         }
       } else if (step === 3) {
-        // FIX: Verify Current PIN before Disabling Lock
         const currentPin = localStorage.getItem('chatverse_pin');
         if (pin === currentPin) {
           localStorage.removeItem('chatverse_applock');
           localStorage.removeItem('chatverse_pin');
           setAppLock(false);
-          setTimeout(() => { if(isMountedRef.current) setShowPinModal(false); }, 300);
+          timeoutId = setTimeout(() => { if(isMountedRef.current) setShowPinModal(false); }, 300);
         } else {
           setPinError(true);
-          setTimeout(() => { if(isMountedRef.current) setPin(''); }, 500);
+          timeoutId = setTimeout(() => { if(isMountedRef.current) setPin(''); }, 500);
         }
       }
     }
+    // Cleanup function memory ko free karne ke liye
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [pin, step, confirmPin]);
 
   const handleDeleteAccount = async () => {
@@ -261,7 +273,7 @@ export default function Settings() {
       localStorage.clear();
       document.documentElement.style.fontSize = '16px';
       
-      window.location.href = '/'; // Hard reset
+      navigate('/', { replace: true }); // ✅ FIX 4: React SPA navigation
     } catch (err) {
       if (isMountedRef.current) {
         setDeleteError(err.response?.data?.error || 'Failed to delete account');
@@ -414,10 +426,15 @@ export default function Settings() {
             </div>
             <button 
               onClick={() => {
-                Notification.requestPermission().then(perm => {
-                  setPushEnabled(perm === 'granted');
-                  if(perm === 'granted') alert("Popups enabled!");
-                });
+                // ✅ FIX 1 (Part 2): Click karne par bhi safe check taaki error na aaye
+                if (typeof Notification !== 'undefined') {
+                  Notification.requestPermission().then(perm => {
+                    setPushEnabled(perm === 'granted');
+                    if(perm === 'granted') alert("Popups enabled!");
+                  });
+                } else {
+                  alert("Push notifications are not supported on your browser/device.");
+                }
               }}
               className={`px-3 py-1.5 rounded-lg text-[12px] font-bold ${pushEnabled ? 'bg-green-100 text-green-600' : 'bg-chatverse text-white'}`}
             >
