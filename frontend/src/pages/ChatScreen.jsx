@@ -23,26 +23,26 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
   // FIX: Socket reconnect rokne ke liye isMuted ko ref me store kiya
   const isMutedRef = useRef(isMuted);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
-  // ✅ FIX 1: Smooth Viewport Resize (Delay added to prevent bottom white screen)
+  // ✅ FIX 1: Desktop aur Mobile ki height ka takraav theek kiya
   useEffect(() => {
-    let resizeTimer;
     const handleResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
+      // Agar screen 640px (Desktop) se badi hai, toh height ko 100% kardo taaki App.jsx wala 850px frame na toote
+      if (window.innerWidth >= 640) {
+        setViewportHeight('100%');
+      } else {
         if (window.visualViewport) {
           setViewportHeight(`${window.visualViewport.height}px`);
-          window.scrollTo(0, 0); // Force browser to recalculate bounds
         } else {
           setViewportHeight(`${window.innerHeight}px`);
         }
-      }, 150); // 150ms delay lets keyboard fully close first
+      }
+      setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'instant' }), 50);
     };
     
     window.visualViewport?.addEventListener('resize', handleResize);
     window.addEventListener('resize', handleResize);
     handleResize(); 
     return () => {
-      clearTimeout(resizeTimer);
       window.visualViewport?.removeEventListener('resize', handleResize);
       window.removeEventListener('resize', handleResize);
     };
@@ -181,8 +181,17 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
       if (msg.sender_id === receiverId || msg.receiver_id === receiverId) {
         setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
         
-        // ✅ FIX: Message aate hi Server ko Delivery (2 Ticks) ka confirmation bhejo
-        socket.emit('message_delivered', { messageId: msg.id, senderId: msg.sender_id });
+        // ✅ FIX 2: Socket DDoS roko. Har message par individual emit hatakar bulk me bhejenge
+        if (msg.status !== 'read' && msg.status !== 'delivered') {
+          if (!window.pendingDeliveries) window.pendingDeliveries = [];
+          window.pendingDeliveries.push(msg.id);
+          
+          if (window.deliveryTimeout) clearTimeout(window.deliveryTimeout);
+          window.deliveryTimeout = setTimeout(() => {
+            socket.emit('messages_delivered_bulk', { messageIds: window.pendingDeliveries, senderId: msg.sender_id });
+            window.pendingDeliveries = [];
+          }, 800); // 800ms ka delay taaki 100 messages ek sath process ho sakein
+        }
         
         if (!hideReadReceiptsRef.current && msg.sender_id === receiverId) {
           socket.emit('mark_chat_read', { senderId: receiverId, receiverId: currentUser.unique_id });
@@ -325,7 +334,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
     const target = e.target;
     window.requestAnimationFrame(() => {
       target.style.height = 'auto';
-      target.style.height = `${target.scrollHeight}px`;
+      // ✅ FIX 3: Textarea ki height cap ki aur resize hone par chat ko niche scroll kiya
+      const newHeight = Math.min(target.scrollHeight, 120); 
+      target.style.height = `${newHeight}px`;
+      endOfMessagesRef.current?.scrollIntoView({ behavior: 'instant' });
     });
 
     if (socket && !hasCustomPrivacy && !hideOnline) {
@@ -496,7 +508,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   const handleDeleteForEveryone = () => {
     const ids = selectedMessages.filter(m => m.sender_id === currentUser.unique_id).map(m => m.id);
-    setMessages(messages.map(msg => ids.includes(msg.id) ? { ...msg, content: "This message was deleted", is_deleted_for_everyone: true } : msg));
+    // ✅ FIX 3: Deleted message se purane emojis (reaction) aur replies bhi hatao
+    setMessages(messages.map(msg => ids.includes(msg.id) ? { ...msg, content: "This message was deleted", is_deleted_for_everyone: true, reaction: null, reply_content: null, reply_to_id: null } : msg));
     if (socket) {
       ids.forEach(id => socket.emit('delete_message_everyone', { messageId: id, receiverId }));
     }
@@ -573,8 +586,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
       const prevMsgDate = index > 0 ? new Date(arr[index - 1].created_at || Date.now()) : null;
       const showDateSeparator = !prevMsgDate || msgDate.toDateString() !== prevMsgDate.toDateString();
 
-      const isPrevSameSender = !showDateSeparator && index > 0 && arr[index - 1].sender_id === msg.sender_id;
-      const isNextSameSender = index < arr.length - 1 && arr[index + 1].sender_id === msg.sender_id && new Date(arr[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
+      // ✅ FIX 1: Agar search chalu hai, toh messages ko aapas mein group mat karo (UI break nahi hoga)
+      const isSearching = searchQuery.trim().length > 0;
+      const isPrevSameSender = !isSearching && !showDateSeparator && index > 0 && arr[index - 1].sender_id === msg.sender_id;
+      const isNextSameSender = !isSearching && index < arr.length - 1 && arr[index + 1].sender_id === msg.sender_id && new Date(arr[index + 1].created_at || Date.now()).toDateString() === msgDate.toDateString();
 
       let radiusClasses = 'rounded-2xl';
       if (isMe) {
@@ -637,8 +652,9 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
                 </div>
               )}
 
+              {/* ✅ FIX 4: State-based transform (swipeOffset) lagaya taaki re-render pe stuck na ho */}
               <div id={`swipe-wrap-${msg.id}`} className="relative flex flex-col z-20"
-                   style={{ transform: 'translate3d(0px, 0, 0)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
+                   style={{ transform: swipingId === msg.id ? `translate3d(${swipeOffset}px, 0, 0)` : 'translate3d(0px, 0, 0)', transition: swipingId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)', touchAction: 'pan-y' }}>
                 
                 <div 
                   onClick={(e) => { 
@@ -712,10 +728,11 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
                   </div>
                 )}
 
+                {/* ✅ FIX 5: Niche se exactly aakhiri 3 messages ka space check karo, varna upar kholo */}
                 {activeReactId === msg.id && (
                   <div 
                     onClick={(e) => e.stopPropagation()} 
-                    className={`absolute z-[60] ${index < 3 ? 'top-full mt-1' : 'bottom-full mb-1'} ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 shadow-[0_4px_15px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 px-3 py-2 flex flex-row items-center gap-3 rounded-full animate-slide-up whitespace-nowrap w-max`}
+                    className={`absolute z-[60] ${(arr.length - index <= 3) ? 'bottom-full mb-1' : 'top-full mt-1'} ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 shadow-[0_4px_15px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 px-3 py-2 flex flex-row items-center gap-3 rounded-full animate-slide-up whitespace-nowrap w-max`}
                   >
                     {reactionEmojis.map(emoji => (
                       <button 
@@ -756,12 +773,12 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   return (
     <div 
-      // ✅ FIX 4: Added h-[100dvh] fallback and touch-none logic to prevent browser pull-to-refresh jumps
-      className={`w-full flex flex-col relative transition-colors overflow-hidden h-[100dvh] sm:h-full overscroll-none touch-pan-x touch-pan-y ${getThemeClasses()}`} 
-      style={{ height: viewportHeight }}
+      // ✅ FIX 2: Wapas 'relative' aur 'sm:h-full' lagaya taaki Desktop par frame original layout follow kare aur mobile pe keyboard issues na aayein
+      className={`relative w-full h-[100dvh] sm:h-full flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y ${getThemeClasses()}`} 
+      style={{ height: viewportHeight, maxHeight: viewportHeight }}
       onClick={handleScreenClick}
     >
-       
+
       {selectedMessages.length > 0 ? (
         <div className="bg-chatverse text-white px-4 py-3 shadow-md flex justify-between items-center z-50 sticky top-0 transition-all">
           <div className="flex items-center gap-4">
@@ -998,7 +1015,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-800 flex flex-col border-t border-gray-100/60 dark:border-gray-700 shadow-md z-10 relative pb-[calc(env(safe-area-inset-bottom)+0px)]">
+      {/* ✅ FIX 4: Sudden env(safe-area) change ko hataya aur 'shrink-0' lagaya taaki keyboard isko daba na sake */}
+      <div className="bg-white dark:bg-gray-800 flex flex-col border-t border-gray-100/60 dark:border-gray-700 shadow-md z-10 relative shrink-0">
         
         {replyingTo && (
           <div className="bg-gray-50 dark:bg-gray-700/50 px-4 py-2 border-l-4 border-chatverse flex justify-between items-center text-sm shadow-sm relative z-0">
