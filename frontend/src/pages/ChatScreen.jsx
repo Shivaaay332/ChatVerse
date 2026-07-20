@@ -121,7 +121,7 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
   const longPressTriggered = useRef(false);
   // ✅ Yahan se local socket state hata di hai
 
-  const [viewportHeight, setViewportHeight] = useState('100dvh');
+  // ✅ FIX 1: JS manual resize hata diya gaya hai. Ab native CSS '100dvh' directly keyboard ko handle karega bina glitch ke.
 
   // ==============================================================
   // MAIN SOCKET & CHAT LOGIC (Global Socket Integrated)
@@ -775,9 +775,8 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   return (
     <div 
-      // ✅ FIX 2: 'h-[100dvh]' class yahan se puri tarah hata di gayi hai taaki JS ki inline height strictly rule kare aur extra stretch na ho
-      className={`relative w-full flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y ${getThemeClasses()}`} 
-      style={{ height: viewportHeight }}
+      // ✅ FIX 2: CSS ko pura control de diya. 'absolute inset-0' App.jsx ke frame me fix rakhega aur browser auto-shrink karega.
+      className={`absolute inset-0 w-full h-full flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y z-10 ${getThemeClasses()}`} 
       onClick={handleScreenClick}
     >
 
@@ -1062,7 +1061,10 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
               id="chat-input"
               value={message} onChange={handleTyping} placeholder="Message..." 
               className="flex-1 max-h-28 overflow-y-auto no-scrollbar bg-gray-100/80 dark:bg-gray-700 dark:text-white rounded-[20px] px-4 py-2.5 text-[15.5px] focus:outline-none resize-none placeholder-gray-400 dark:placeholder-gray-400 shadow-sm" 
-              rows="1" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
+              rows="1" 
+              // ✅ FIX 3: Keyboard native open hone par smooth scroll taaki latest message dikhe
+              onFocus={() => setTimeout(() => endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' }), 300)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
             />
             <button 
               onClick={() => {
