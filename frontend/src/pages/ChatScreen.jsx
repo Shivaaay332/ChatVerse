@@ -23,15 +23,17 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
   // FIX: Socket reconnect rokne ke liye isMuted ko ref me store kiya
   const isMutedRef = useRef(isMuted);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
-  // ✅ FIX 1: Desktop aur Mobile ki height ka takraav theek kiya
+  // ✅ FIX 1: Mobile me keyboard aate hi Double Push ko roko
   useEffect(() => {
     const handleResize = () => {
-      // Agar screen 640px (Desktop) se badi hai, toh height ko 100% kardo taaki App.jsx wala 850px frame na toote
       if (window.innerWidth >= 640) {
         setViewportHeight('100%');
       } else {
         if (window.visualViewport) {
           setViewportHeight(`${window.visualViewport.height}px`);
+          // ✅ FIX: Screen shrink hone ke baad agar browser page ko upar dhakele, toh use wapas '0' par lock kardo (Header bacha rahega)
+          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+          document.body.scrollTop = 0; 
         } else {
           setViewportHeight(`${window.innerHeight}px`);
         }
@@ -773,9 +775,9 @@ export default function ChatScreen({ socket }) { // ✅ NAYA: App.jsx se socket 
 
   return (
     <div 
-      // ✅ FIX 2: Wapas 'relative' aur 'sm:h-full' lagaya taaki Desktop par frame original layout follow kare aur mobile pe keyboard issues na aayein
-      className={`relative w-full h-[100dvh] sm:h-full flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y ${getThemeClasses()}`} 
-      style={{ height: viewportHeight, maxHeight: viewportHeight }}
+      // ✅ FIX 2: 'h-[100dvh]' class yahan se puri tarah hata di gayi hai taaki JS ki inline height strictly rule kare aur extra stretch na ho
+      className={`relative w-full flex flex-col transition-colors overflow-hidden overscroll-none touch-pan-x touch-pan-y ${getThemeClasses()}`} 
+      style={{ height: viewportHeight }}
       onClick={handleScreenClick}
     >
 
